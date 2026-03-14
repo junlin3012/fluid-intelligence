@@ -8,7 +8,8 @@ Shopify is the first vertical. It is not the last.
 
 ## Required Reading
 
-Before proposing any design or architecture, agents MUST read:
+Before ANY work, agents MUST read the agent behavior docs:
+- `docs/agent-behavior/system-understanding.md` — How the system works at runtime. Read this FIRST when troubleshooting.
 - `docs/agent-behavior/introspect.md` — Introspection protocol. How to think, challenge assumptions, catch blind spots.
 - `docs/agent-behavior/failure-log.md` — Past failures. Learn from them, don't repeat them.
 - `docs/agent-behavior/insights.md` — What worked well. Patterns to reuse.
@@ -29,6 +30,7 @@ Before writing code, agents MUST read:
 
 Agents MUST write back to `docs/agent-behavior/` — not just read from it:
 
+- **After troubleshooting**: Update `system-understanding.md` with what you learned. This is NOT incremental — it should represent the COMPLETE current understanding of the system. Add new sections, update timings, correct wrong assumptions.
 - **After a failure**: Add the failure and root cause to `failure-log.md`. Update `introspect.md` if a new trap or anti-pattern was discovered.
 - **After a success**: Add the insight to `insights.md`. What pattern worked? What should future agents reuse?
 - **After learning a codebase pattern**: Add it to `patterns.md`.
@@ -42,10 +44,10 @@ The goal: each agent session leaves this system smarter than it found it.
 - **Product**: Fluid Intelligence — Universal MCP Gateway
 - **First vertical**: Shopify (junlinleather-5148.myshopify.com)
 - GCP Project: `junlinleather-mcp` (asia-southeast1)
-- Cloud Run URL: `https://junlin-shopify-mcp-1056128102929.asia-southeast1.run.app`
-- GitHub: `junlin3012/junlin-shopify-mcp` (public, branch protection on main)
-- Architecture: Config-driven MCP Gateway (Node.js) aggregating any number of backends (Apollo, dev-mcp, Google Sheets, REST, future)
-- See `docs/superpowers/specs/2026-03-14-mcp-gateway-design.md` for the active design spec
+- Cloud Run URL: `https://fluid-intelligence-1056128102929.asia-southeast1.run.app`
+- GitHub: `junlin3012/fluid-intelligence` (public)
+- Architecture: IBM ContextForge (Python/FastAPI) + mcp-auth-proxy (Go) + Apollo MCP Server (Rust)
+- See `docs/superpowers/specs/2026-03-14-fluid-intelligence-v3-design.md` for the active design spec
 
 ## Competitive Landscape
 

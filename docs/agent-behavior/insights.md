@@ -117,6 +117,19 @@
 - **Insight**: Parallel spec + plan review catches env var wiring issues, missing package installations, and database setup gaps that are invisible when reading either document alone. The spec defines WHAT env vars exist; the plan defines HOW they're deployed. Mismatches between these two layers are the most dangerous bugs because they're correct in isolation but broken in combination.
 - **Pattern**: After writing both spec and plan, dispatch TWO review agents in parallel: one for internal spec consistency, one for spec-plan consistency. The plan reviewer should specifically check: (a) every env var in the spec appears in cloudbuild.yaml, (b) every binary/tool used at runtime is installed in the Dockerfile, (c) every database user/table referenced is created in setup tasks.
 
+## 2026-03-15: Systematic Debugging Beats Brute-Force Cloud Build Iteration
+
+- **Context**: Spent 5+ Cloud Build iterations (~$1-2 each, 5-10 min each) fixing one issue at a time: missing `tar`, missing `pip`, PORT conflict. Each fix revealed the next failure. User correctly called this out as "not effective" and "no strategy."
+- **Insight**: One systematic log analysis found ALL 6 root causes at once:
+  1. `uv pip install psycopg2-binary` corrupted the ContextForge venv (caused `ModuleNotFoundError`)
+  2. Apollo CLI used `--config` flag instead of positional arg
+  3. Cloud Run's `PORT=8080` env var is immutable (can't be overridden by `export`)
+  4. No early crash detection (background processes crash silently, script waits 60s)
+  5. Apollo health endpoint mismatch (`/healthz` vs `/health`)
+  6. SIGTERM trap set after processes started (cleanup fails during startup)
+- **Key discovery**: `uv pip install` into an existing venv can corrupt entry point scripts while leaving module imports intact. The `mcpgateway` CLI script broke (`ModuleNotFoundError`) but `python3 -m mcpgateway.translate` worked fine.
+- **Pattern**: Before submitting ANY Cloud Build: (1) Read ALL logs from the last failure, including stderr and tracebacks, (2) Trace the chronological startup sequence, (3) Identify every process that should start and verify it has a log entry, (4) Fix ALL issues in one commit. One well-analyzed build beats five guess-and-check builds.
+
 ## 2026-03-14: Gateway Backends — Separate Headless vs Local Tools
 
 - **Context**: User wanted Google Workspace MCP (90 tools, 1.8K stars) for the gateway. Analysis showed it requires browser OAuth (not headless-friendly) and adds 90 tools to context. Recommended `xing5/mcp-google-sheets` (17 tools, service account auth) for the gateway and `taylorwilsdon/google_workspace_mcp` for local Claude Code use.
