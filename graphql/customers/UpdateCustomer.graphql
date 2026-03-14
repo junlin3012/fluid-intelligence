@@ -1,0 +1,40 @@
+mutation UpdateCustomer(
+  $id: ID!
+  $firstName: String
+  $lastName: String
+  $email: String
+  $phone: String
+  $note: String
+  $tags: [String!]
+) {
+  customerUpdate(
+    input: {
+      id: $id
+      firstName: $firstName
+      lastName: $lastName
+      email: $email
+      phone: $phone
+      note: $note
+      tags: $tags
+    }
+  ) {
+    customer {
+      id
+      firstName
+      lastName
+      defaultEmailAddress {
+        emailAddress
+      }
+      defaultPhoneNumber {
+        phoneNumber
+      }
+      note
+      tags
+      updatedAt
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

@@ -1,0 +1,36 @@
+mutation UpdateProduct(
+  $id: ID!
+  $title: String
+  $descriptionHtml: String
+  $status: ProductStatus
+  $productType: String
+  $vendor: String
+  $tags: [String!]
+) {
+  productUpdate(
+    product: {
+      id: $id
+      title: $title
+      descriptionHtml: $descriptionHtml
+      status: $status
+      productType: $productType
+      vendor: $vendor
+      tags: $tags
+    }
+  ) {
+    product {
+      id
+      title
+      descriptionHtml
+      status
+      productType
+      vendor
+      tags
+      updatedAt
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

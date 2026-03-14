@@ -1,0 +1,14 @@
+mutation MarkOrderAsPaid($id: ID!) {
+  orderMarkAsPaid(input: { id: $id }) {
+    order {
+      id
+      name
+      displayFinancialStatus
+      updatedAt
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

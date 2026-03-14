@@ -1,0 +1,30 @@
+mutation CreateShipment(
+  $movementId: ID!
+  $lineItems: [InventoryShipmentLineItemInput!]!
+  $trackingNumber: String
+  $trackingCompany: String
+  $trackingUrl: URL
+  $arrivesAt: DateTime
+) {
+  inventoryShipmentCreate(
+    input: {
+      movementId: $movementId
+      lineItems: $lineItems
+      trackingInput: {
+        trackingNumber: $trackingNumber
+        company: $trackingCompany
+        trackingUrl: $trackingUrl
+        arrivesAt: $arrivesAt
+      }
+    }
+  ) {
+    inventoryShipment {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

@@ -1,0 +1,13 @@
+mutation MarkTransferReadyToShip($id: ID!) {
+  inventoryTransferMarkAsReadyToShip(id: $id) {
+    inventoryTransfer {
+      id
+      status
+      totalQuantity
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

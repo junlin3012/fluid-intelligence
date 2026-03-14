@@ -1,0 +1,50 @@
+mutation CreateFulfillment(
+  $fulfillmentOrderId: ID!
+  $trackingNumber: String
+  $trackingUrl: URL
+  $trackingCompany: String
+  $notifyCustomer: Boolean = true
+) {
+  fulfillmentCreate(
+    fulfillment: {
+      lineItemsByFulfillmentOrder: [
+        {
+          fulfillmentOrderId: $fulfillmentOrderId
+        }
+      ]
+      trackingInfo: {
+        number: $trackingNumber
+        url: $trackingUrl
+        company: $trackingCompany
+      }
+      notifyCustomer: $notifyCustomer
+    }
+  ) {
+    fulfillment {
+      id
+      status
+      trackingInfo {
+        number
+        url
+        company
+      }
+      createdAt
+      fulfillmentOrders(first: 5) {
+        edges {
+          node {
+            id
+            status
+            order {
+              id
+              name
+            }
+          }
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

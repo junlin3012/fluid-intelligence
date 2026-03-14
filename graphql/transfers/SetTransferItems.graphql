@@ -1,0 +1,21 @@
+mutation SetTransferItems(
+  $transferId: ID!
+  $lineItems: [InventoryTransferLineItemInput!]!
+) {
+  inventoryTransferSetItems(
+    input: {
+      id: $transferId
+      lineItems: $lineItems
+    }
+  ) {
+    inventoryTransfer {
+      id
+      status
+      totalQuantity
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

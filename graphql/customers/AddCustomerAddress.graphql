@@ -1,0 +1,29 @@
+mutation AddCustomerAddress(
+  $customerId: ID!
+  $address: MailingAddressInput!
+  $setAsDefault: Boolean = true
+) {
+  customerAddressCreate(
+    customerId: $customerId
+    address: $address
+    setAsDefault: $setAsDefault
+  ) {
+    address {
+      id
+      firstName
+      lastName
+      company
+      address1
+      address2
+      city
+      province
+      country
+      zip
+      phone
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

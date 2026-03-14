@@ -1,0 +1,54 @@
+mutation CalculateDraftOrder(
+  $lineItems: [DraftOrderLineItemInput!]!
+  $customerId: ID
+  $shippingAddress: MailingAddressInput
+) {
+  draftOrderCalculate(
+    input: {
+      lineItems: $lineItems
+      purchasingEntity: { customerId: $customerId }
+      shippingAddress: $shippingAddress
+    }
+  ) {
+    calculatedDraftOrder {
+      lineItems {
+        title
+        quantity
+        originalTotalSet {
+          shopMoney {
+            amount
+            currencyCode
+          }
+        }
+      }
+      totalPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      subtotalPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      totalTaxSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      totalShippingPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

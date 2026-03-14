@@ -1,0 +1,38 @@
+mutation CreateCustomer(
+  $firstName: String!
+  $lastName: String!
+  $email: String
+  $phone: String
+  $note: String
+  $tags: [String!]
+) {
+  customerCreate(
+    input: {
+      firstName: $firstName
+      lastName: $lastName
+      email: $email
+      phone: $phone
+      note: $note
+      tags: $tags
+    }
+  ) {
+    customer {
+      id
+      firstName
+      lastName
+      defaultEmailAddress {
+        emailAddress
+      }
+      defaultPhoneNumber {
+        phoneNumber
+      }
+      note
+      tags
+      createdAt
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

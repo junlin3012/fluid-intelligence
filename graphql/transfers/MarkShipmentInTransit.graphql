@@ -1,0 +1,18 @@
+mutation MarkShipmentInTransit(
+  $id: ID!
+  $dateShipped: DateTime
+) {
+  inventoryShipmentMarkInTransit(
+    id: $id
+    dateShipped: $dateShipped
+  ) {
+    inventoryShipment {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

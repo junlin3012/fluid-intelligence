@@ -1,0 +1,20 @@
+mutation ReceiveShipment(
+  $id: ID!
+  $lineItems: [InventoryShipmentReceiveItemInput!]
+  $dateReceived: DateTime
+) {
+  inventoryShipmentReceive(
+    id: $id
+    lineItems: $lineItems
+    dateReceived: $dateReceived
+  ) {
+    inventoryShipment {
+      id
+      status
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

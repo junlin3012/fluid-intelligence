@@ -1,0 +1,34 @@
+mutation AdjustInventory(
+  $reason: String!
+  $name: String! = "available"
+  $changes: [InventoryChangeInput!]!
+) {
+  inventoryAdjustQuantities(
+    input: {
+      reason: $reason
+      name: $name
+      changes: $changes
+    }
+  ) {
+    inventoryAdjustmentGroup {
+      reason
+      changes {
+        name
+        delta
+        quantityAfterChange
+        item {
+          id
+          sku
+        }
+        location {
+          id
+          name
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

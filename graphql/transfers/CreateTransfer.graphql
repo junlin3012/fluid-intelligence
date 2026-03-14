@@ -1,0 +1,31 @@
+mutation CreateTransfer(
+  $destinationLocationId: ID!
+  $originLocationId: ID
+  $lineItems: [InventoryTransferLineItemInput!]!
+  $note: String
+  $tags: [String!]
+  $referenceName: String
+) {
+  inventoryTransferCreate(
+    input: {
+      destinationLocationId: $destinationLocationId
+      originLocationId: $originLocationId
+      lineItems: $lineItems
+      note: $note
+      tags: $tags
+      referenceName: $referenceName
+    }
+  ) {
+    inventoryTransfer {
+      id
+      referenceName
+      status
+      note
+      totalQuantity
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

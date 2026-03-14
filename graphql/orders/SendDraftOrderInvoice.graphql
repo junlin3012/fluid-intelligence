@@ -1,0 +1,28 @@
+mutation SendDraftOrderInvoice(
+  $id: ID!
+  $to: String
+  $subject: String
+  $customMessage: String
+  $bcc: [String!]
+) {
+  draftOrderInvoiceSend(
+    id: $id
+    email: {
+      to: $to
+      subject: $subject
+      customMessage: $customMessage
+      bcc: $bcc
+    }
+  ) {
+    draftOrder {
+      id
+      name
+      status
+      invoiceUrl
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}

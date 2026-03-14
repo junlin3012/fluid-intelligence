@@ -1,0 +1,21 @@
+# Secrets
+.env
+*.pem
+*.key
+
+# Runtime
+data/
+*.db
+
+# IDE
+.idea/
+.vscode/
+
+# Superpowers
+.superpowers/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
