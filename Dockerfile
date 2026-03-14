@@ -17,13 +17,12 @@ USER root
 # Install runtime dependencies
 RUN microdnf install -y nodejs npm curl jq tar gzip && microdnf clean all
 
-# Install psycopg2 for ContextForge PostgreSQL support
-# ContextForge venv pip is at /app/.venv/bin/pip
-RUN /app/.venv/bin/pip install --no-cache-dir psycopg2-binary
-
 # Install uv as standalone binary (avoids venv conflicts)
 RUN curl -fsSL https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
     | tar -xz --strip-components=1 -C /usr/local/bin
+
+# Install psycopg2 into ContextForge's venv (no pip in image, use uv)
+RUN uv pip install --python /app/.venv/bin/python psycopg2-binary
 
 # tini (PID 1 init)
 RUN curl -fsSL https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 \
