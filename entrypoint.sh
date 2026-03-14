@@ -8,8 +8,10 @@ export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${DB_PASSWORD}@/${DB_
 export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
 export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
-# Cloud Run reserves PORT (sets it to 8080). Override for ContextForge.
-export PORT="${MCPGATEWAY_PORT:-4444}"
+# Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden
+# by export. We pass PORT inline only to mcpgateway so it listens on 4444,
+# while Cloud Run's health probe hits auth-proxy on 8080.
+export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
 
 # --- Fetch Shopify access token via client credentials ---
 TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
@@ -40,8 +42,8 @@ done
 apollo --config /app/mcp-config.yaml &
 APOLLO_PID=$!
 
-# 2. IBM ContextForge (Python, gateway core)
-mcpgateway &
+# 2. IBM ContextForge (Python, gateway core) — PORT set inline, not global
+PORT="$CONTEXTFORGE_PORT" mcpgateway &
 CONTEXTFORGE_PID=$!
 
 # 3. dev-mcp bridge (stdio→SSE)
@@ -61,7 +63,7 @@ TRANSLATE_SHEETS_PID=$!
 # --- Wait for ContextForge before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
 for i in $(seq 1 60); do
-  if curl -sf http://localhost:4444/healthz > /dev/null 2>&1; then
+  if curl -sf http://localhost:${CONTEXTFORGE_PORT}/healthz > /dev/null 2>&1; then
     echo "[fluid-intelligence] ContextForge ready after ${i}s"
     break
   fi
@@ -83,7 +85,7 @@ mcp-auth-proxy \
   --password "$AUTH_PASSWORD" \
   --no-auto-tls \
   --data-path /app/data \
-  -- http://localhost:4444 &
+  -- http://localhost:${CONTEXTFORGE_PORT} &
 AUTHPROXY_PID=$!
 
 # 6. Bootstrap: register backends (foreground — fail fast if broken)
@@ -96,7 +98,7 @@ echo "[fluid-intelligence] Running bootstrap..."
 
 echo "[fluid-intelligence] All services running"
 echo "  Apollo:         PID=$APOLLO_PID  :8000"
-echo "  ContextForge:   PID=$CONTEXTFORGE_PID  :4444"
+echo "  ContextForge:   PID=$CONTEXTFORGE_PID  :${CONTEXTFORGE_PORT}"
 echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :8003"
 echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :8004"
 echo "  auth-proxy:     PID=$AUTHPROXY_PID  :8080"

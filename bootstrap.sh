@@ -13,7 +13,7 @@ register_server() {
 
   # Check if already registered (container restart case)
   if curl -sf -H "Authorization: Bearer $TOKEN" \
-    "http://localhost:4444/servers" 2>/dev/null | \
+    "http://localhost:${CONTEXTFORGE_PORT:-4444}/servers" 2>/dev/null | \
     jq -e ".[] | select(.name==\"$name\")" > /dev/null 2>&1; then
     echo "[bootstrap] $name already registered, skipping"
     return 0
@@ -25,7 +25,7 @@ register_server() {
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}" \
-      http://localhost:4444/servers 2>&1)
+      http://localhost:${CONTEXTFORGE_PORT:-4444}/servers 2>&1)
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | head -n -1)
 
