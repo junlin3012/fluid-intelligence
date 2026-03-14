@@ -21,9 +21,9 @@ RUN microdnf install -y nodejs npm curl jq tar gzip && microdnf clean all
 RUN curl -fsSL https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
     | tar -xz --strip-components=1 -C /usr/local/bin
 
-# NOTE: Do NOT run "uv pip install" into the ContextForge venv — it corrupts
-# the mcpgateway entry point (ModuleNotFoundError). ContextForge already
-# ships psycopg2 for PostgreSQL support.
+# Install psycopg2 into ContextForge's venv. uv pip install corrupts the
+# mcpgateway entry point script, but we bypass it with direct main() invocation.
+RUN uv pip install --python /app/.venv/bin/python psycopg2-binary
 
 # tini (PID 1 init)
 RUN curl -fsSL https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 \
