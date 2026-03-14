@@ -15,7 +15,7 @@ FROM ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
 USER root
 
 # Install runtime dependencies
-RUN microdnf install -y nodejs npm curl jq && microdnf clean all
+RUN microdnf install -y nodejs npm curl jq tar gzip && microdnf clean all
 
 # Install uv as standalone binary (avoids venv conflicts)
 RUN curl -fsSL https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
