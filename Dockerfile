@@ -17,6 +17,9 @@ USER root
 # Install runtime dependencies
 RUN microdnf install -y nodejs npm curl jq tar gzip && microdnf clean all
 
+# Install psycopg2 for ContextForge PostgreSQL support
+RUN pip install psycopg2-binary
+
 # Install uv as standalone binary (avoids venv conflicts)
 RUN curl -fsSL https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
     | tar -xz --strip-components=1 -C /usr/local/bin
