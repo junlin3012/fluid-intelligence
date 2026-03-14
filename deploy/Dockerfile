@@ -36,10 +36,10 @@ COPY --from=apollo-base /usr/local/bin/apollo /usr/local/bin/apollo
 COPY --from=authproxy /mcp-auth-proxy /usr/local/bin/mcp-auth-proxy
 RUN chmod 755 /usr/local/bin/apollo /usr/local/bin/mcp-auth-proxy
 
-# Copy config and scripts
-COPY entrypoint.sh /app/entrypoint.sh
-COPY bootstrap.sh /app/bootstrap.sh
-COPY mcp-config.yaml /app/mcp-config.yaml
+# Copy config and scripts (paths relative to build context = repo root)
+COPY scripts/entrypoint.sh /app/entrypoint.sh
+COPY scripts/bootstrap.sh /app/bootstrap.sh
+COPY config/mcp-config.yaml /app/mcp-config.yaml
 COPY shopify-schema.graphql /app/shopify-schema.graphql
 COPY graphql/ /app/graphql/
 

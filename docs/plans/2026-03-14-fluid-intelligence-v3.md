@@ -8,7 +8,7 @@
 
 **Tech Stack:** Docker multi-stage, Go (mcp-auth-proxy v2.5.4), Python (ContextForge 1.0.0-RC-2, mcp-google-sheets), Rust (Apollo MCP), Node.js (dev-mcp), Cloud Build, Cloud Run, Cloud SQL PostgreSQL, Secret Manager.
 
-**Spec:** `docs/superpowers/specs/2026-03-14-fluid-intelligence-v3-design.md`
+**Spec:** `docs/specs/2026-03-14-fluid-intelligence-v3-design.md`
 
 ---
 

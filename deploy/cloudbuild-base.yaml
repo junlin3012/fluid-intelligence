@@ -3,7 +3,7 @@ steps:
     args:
       - 'build'
       - '-f'
-      - 'Dockerfile.base'
+      - 'deploy/Dockerfile.base'
       - '-t'
       - 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intelligence-base:latest'
       - '.'

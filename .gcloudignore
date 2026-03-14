@@ -1,15 +1,13 @@
 # Cloud Build ignore
-.claude/
 .git/
 .gitignore
 .gcloudignore
 .dockerignore
-*.md
-cloudbuild-base.yaml
+.DS_Store
 .env
+*.md
 *.secret
 *.pem
 *.key
-.DS_Store
-tmp/
 docs/
+tmp/

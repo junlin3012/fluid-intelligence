@@ -1,5 +1,8 @@
 .git
 docs
+deploy
 *.md
-!mcp-config.yaml
 .DS_Store
+.env
+*.pem
+*.key

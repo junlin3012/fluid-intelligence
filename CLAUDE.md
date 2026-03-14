@@ -16,7 +16,24 @@ Before ANY work, agents MUST read the agent behavior docs:
 - `docs/agent-behavior/patterns.md` — Codebase-specific conventions and patterns.
 
 Before writing code, agents MUST read:
-- `docs/superpowers/specs/` — Active design specs. Never implement without checking for an approved spec first.
+- `docs/specs/` — Active design specs. Never implement without checking for an approved spec first.
+
+## Project Structure
+
+```
+├── deploy/          Infrastructure (Dockerfile, Cloud Build configs)
+├── scripts/         Runtime scripts (entrypoint.sh, bootstrap.sh)
+├── config/          Service configuration (mcp-config.yaml)
+├── graphql/         Shopify GraphQL operations (17 .graphql files)
+├── docs/            Architecture, runbook, research, specs, plans
+│   ├── architecture.md     System overview
+│   ├── runbook.md          Operations guide
+│   ├── agent-behavior/     Agent self-improvement docs
+│   ├── research/           Market research
+│   ├── specs/              Design specs
+│   └── plans/              Implementation plans
+└── CLAUDE.md        This file
+```
 
 ## Agent Behavior
 
@@ -47,7 +64,7 @@ The goal: each agent session leaves this system smarter than it found it.
 - Cloud Run URL: `https://fluid-intelligence-1056128102929.asia-southeast1.run.app`
 - GitHub: `junlin3012/fluid-intelligence` (public)
 - Architecture: IBM ContextForge (Python/FastAPI) + mcp-auth-proxy (Go) + Apollo MCP Server (Rust)
-- See `docs/superpowers/specs/2026-03-14-fluid-intelligence-v3-design.md` for the active design spec
+- See `docs/specs/2026-03-14-fluid-intelligence-v3-design.md` for the active design spec
 
 ## Competitive Landscape
 
