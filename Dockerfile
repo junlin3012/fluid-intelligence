@@ -21,8 +21,9 @@ RUN microdnf install -y nodejs npm curl jq tar gzip && microdnf clean all
 RUN curl -fsSL https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
     | tar -xz --strip-components=1 -C /usr/local/bin
 
-# Install psycopg2 into ContextForge's venv (no pip in image, use uv)
-RUN uv pip install --python /app/.venv/bin/python psycopg2-binary
+# NOTE: Do NOT run "uv pip install" into the ContextForge venv — it corrupts
+# the mcpgateway entry point (ModuleNotFoundError). ContextForge already
+# ships psycopg2 for PostgreSQL support.
 
 # tini (PID 1 init)
 RUN curl -fsSL https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 \
@@ -43,6 +44,11 @@ COPY graphql/ /app/graphql/
 # Create data directory and set ownership for all app files
 RUN mkdir -p /app/data && chown -R 1001:0 /app
 RUN chmod +x /app/entrypoint.sh /app/bootstrap.sh
+
+# Verify ContextForge venv is intact (catches Dockerfile regressions at build time)
+RUN /app/.venv/bin/python -c "from mcpgateway.cli import main; print('✓ mcpgateway entry point OK')"
+RUN /app/.venv/bin/python -c "import psycopg2; print('✓ psycopg2 OK')" || \
+    echo "⚠ psycopg2 not found — ContextForge may need it for PostgreSQL"
 
 USER 1001
 EXPOSE 8080

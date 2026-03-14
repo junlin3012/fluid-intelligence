@@ -3,14 +3,26 @@ set -euo pipefail
 
 echo "[fluid-intelligence] Starting services..."
 
+# --- Graceful shutdown (set trap BEFORE starting processes) ---
+PIDS=()
+cleanup() {
+  echo "[fluid-intelligence] SIGTERM received, shutting down..."
+  for pid in "${PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  wait
+  exit 0
+}
+trap cleanup SIGTERM SIGINT
+
 # --- Env var wiring ---
 export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${DB_PASSWORD}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
 export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
 export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
-# Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden
-# by export. We pass PORT inline only to mcpgateway so it listens on 4444,
-# while Cloud Run's health probe hits auth-proxy on 8080.
+
+# Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden.
+# We use --port flag for mcpgateway instead of relying on PORT env var.
 export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
 
 # --- Fetch Shopify access token via client credentials ---
@@ -36,15 +48,33 @@ for attempt in 1 2 3 4 5; do
   sleep $((attempt * 2))
 done
 
+# --- Helper: start a process with early crash detection ---
+start_and_verify() {
+  local name="$1" pid="$2"
+  sleep 2
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "[fluid-intelligence] FATAL: $name (PID $pid) crashed on startup"
+    # Kill anything else we started
+    for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
+    exit 1
+  fi
+  echo "[fluid-intelligence] $name started (PID $pid)"
+}
+
 # --- Start services ---
 
-# 1. Apollo MCP Server (Rust, Shopify GraphQL)
-apollo --config /app/mcp-config.yaml &
+# 1. Apollo MCP Server (Rust, Shopify GraphQL) — positional arg, NOT --config
+apollo /app/mcp-config.yaml &
 APOLLO_PID=$!
+PIDS+=($APOLLO_PID)
+start_and_verify "Apollo" $APOLLO_PID
 
-# 2. IBM ContextForge (Python, gateway core) — PORT set inline, not global
-PORT="$CONTEXTFORGE_PORT" mcpgateway &
+# 2. IBM ContextForge (Python, gateway core)
+# Use --port flag explicitly. Do NOT set PORT env var (Cloud Run reserves it).
+mcpgateway --port "$CONTEXTFORGE_PORT" --host 0.0.0.0 &
 CONTEXTFORGE_PID=$!
+PIDS+=($CONTEXTFORGE_PID)
+start_and_verify "ContextForge" $CONTEXTFORGE_PID
 
 # 3. dev-mcp bridge (stdio→SSE)
 python3 -m mcpgateway.translate \
@@ -52,6 +82,7 @@ python3 -m mcpgateway.translate \
   --expose-sse \
   --port 8003 &
 TRANSLATE_DEVMCP_PID=$!
+PIDS+=($TRANSLATE_DEVMCP_PID)
 
 # 4. google-sheets bridge (stdio→SSE)
 python3 -m mcpgateway.translate \
@@ -59,17 +90,24 @@ python3 -m mcpgateway.translate \
   --expose-sse \
   --port 8004 &
 TRANSLATE_SHEETS_PID=$!
+PIDS+=($TRANSLATE_SHEETS_PID)
 
-# --- Wait for ContextForge before starting auth proxy ---
+# --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
 for i in $(seq 1 60); do
   if curl -sf http://localhost:${CONTEXTFORGE_PORT}/healthz > /dev/null 2>&1; then
     echo "[fluid-intelligence] ContextForge ready after ${i}s"
     break
   fi
+  # Check if mcpgateway is still alive (fast-fail instead of 60s timeout)
+  if ! kill -0 "$CONTEXTFORGE_PID" 2>/dev/null; then
+    echo "[fluid-intelligence] FATAL: ContextForge process died during startup"
+    for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
+    exit 1
+  fi
   if [ "$i" -eq 60 ]; then
     echo "[fluid-intelligence] FATAL: ContextForge not ready after 60s"
-    kill $APOLLO_PID $CONTEXTFORGE_PID $TRANSLATE_DEVMCP_PID $TRANSLATE_SHEETS_PID 2>/dev/null || true
+    for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
   fi
   sleep 1
@@ -87,12 +125,14 @@ mcp-auth-proxy \
   --data-path /app/data \
   -- http://localhost:${CONTEXTFORGE_PORT} &
 AUTHPROXY_PID=$!
+PIDS+=($AUTHPROXY_PID)
+start_and_verify "auth-proxy" $AUTHPROXY_PID
 
 # 6. Bootstrap: register backends (foreground — fail fast if broken)
 echo "[fluid-intelligence] Running bootstrap..."
 /app/bootstrap.sh || {
   echo "[fluid-intelligence] FATAL: bootstrap failed — no backends registered"
-  kill $APOLLO_PID $CONTEXTFORGE_PID $TRANSLATE_DEVMCP_PID $TRANSLATE_SHEETS_PID $AUTHPROXY_PID 2>/dev/null || true
+  for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   exit 1
 }
 
@@ -102,15 +142,6 @@ echo "  ContextForge:   PID=$CONTEXTFORGE_PID  :${CONTEXTFORGE_PORT}"
 echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :8003"
 echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :8004"
 echo "  auth-proxy:     PID=$AUTHPROXY_PID  :8080"
-
-# --- Graceful shutdown ---
-cleanup() {
-  echo "[fluid-intelligence] SIGTERM received, shutting down..."
-  kill "$AUTHPROXY_PID" "$CONTEXTFORGE_PID" "$TRANSLATE_DEVMCP_PID" "$TRANSLATE_SHEETS_PID" "$APOLLO_PID" 2>/dev/null || true
-  wait
-  exit 0
-}
-trap cleanup SIGTERM SIGINT
 
 # --- Monitor: exit if any process dies ---
 wait -n $APOLLO_PID $CONTEXTFORGE_PID $TRANSLATE_DEVMCP_PID $TRANSLATE_SHEETS_PID $AUTHPROXY_PID
@@ -124,5 +155,5 @@ for name_pid in "Apollo:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$
   fi
 done
 
-kill $APOLLO_PID $CONTEXTFORGE_PID $TRANSLATE_DEVMCP_PID $TRANSLATE_SHEETS_PID $AUTHPROXY_PID 2>/dev/null || true
+for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
 exit 1
