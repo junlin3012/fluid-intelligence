@@ -2,18 +2,34 @@
 set -euo pipefail
 
 # Generate short-lived admin JWT for registration
-TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \
-  --username "$PLATFORM_ADMIN_EMAIL" \
-  --exp 5 \
-  --secret "$JWT_SECRET_KEY")
+TOKEN=$(/app/.venv/bin/python -c "
+import sys
+sys.argv = ['create_jwt_token', '--username', '$PLATFORM_ADMIN_EMAIL', '--exp', '5', '--secret', '$JWT_SECRET_KEY']
+from mcpgateway.utils.create_jwt_token import main
+main()
+" 2>/dev/null) || {
+  # Fallback: try the module directly
+  TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \
+    --username "$PLATFORM_ADMIN_EMAIL" \
+    --exp 5 \
+    --secret "$JWT_SECRET_KEY" 2>/dev/null)
+}
 
-# Idempotent registration: check if server exists, create if not
-register_server() {
+if [ -z "$TOKEN" ]; then
+  echo "[bootstrap] FATAL: Could not generate JWT token"
+  exit 1
+fi
+echo "[bootstrap] JWT token generated"
+
+CF="http://localhost:${CONTEXTFORGE_PORT:-4444}"
+
+# Register a gateway (backend MCP server) with ContextForge
+register_gateway() {
   local name="$1" url="$2" transport="$3"
 
   # Check if already registered (container restart case)
   if curl -sf -H "Authorization: Bearer $TOKEN" \
-    "http://localhost:${CONTEXTFORGE_PORT:-4444}/servers" 2>/dev/null | \
+    "$CF/gateways" 2>/dev/null | \
     jq -e ".[] | select(.name==\"$name\")" > /dev/null 2>&1; then
     echo "[bootstrap] $name already registered, skipping"
     return 0
@@ -25,7 +41,7 @@ register_server() {
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}" \
-      http://localhost:${CONTEXTFORGE_PORT:-4444}/servers 2>&1)
+      "$CF/gateways" 2>&1)
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | head -n -1)
 
@@ -49,7 +65,7 @@ register_server() {
   return 1
 }
 
-# Wait for Apollo before registering it (TCP connection check — Apollo may not have /health)
+# Wait for Apollo before registering it (TCP connection check)
 echo "[bootstrap] Waiting for Apollo..."
 for i in $(seq 1 30); do
   curl -s --connect-timeout 2 --max-time 3 http://localhost:8000/ -o /dev/null 2>&1 && break
@@ -58,7 +74,7 @@ for i in $(seq 1 30); do
 done
 
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
-register_server "apollo-shopify" "http://localhost:8000/mcp" "streamablehttp"
+register_gateway "apollo-shopify" "http://localhost:8000/mcp" "STREAMABLEHTTP"
 
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
 echo "[bootstrap] Waiting for dev-mcp bridge..."
@@ -69,7 +85,7 @@ for i in $(seq 1 90); do
 done
 
 echo "[bootstrap] Registering dev-mcp (Shopify docs)..."
-register_server "shopify-dev-mcp" "http://localhost:8003/sse" "sse"
+register_gateway "shopify-dev-mcp" "http://localhost:8003/sse" "SSE"
 
 # Wait for google-sheets bridge
 echo "[bootstrap] Waiting for google-sheets bridge..."
@@ -80,6 +96,6 @@ for i in $(seq 1 60); do
 done
 
 echo "[bootstrap] Registering google-sheets..."
-register_server "google-sheets" "http://localhost:8004/sse" "sse"
+register_gateway "google-sheets" "http://localhost:8004/sse" "SSE"
 
 echo "[bootstrap] All 3 backends registered"
