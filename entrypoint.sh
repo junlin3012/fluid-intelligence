@@ -8,6 +8,8 @@ export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${DB_PASSWORD}@/${DB_
 export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
 export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
+# Cloud Run reserves PORT (sets it to 8080). Override for ContextForge.
+export PORT="${MCPGATEWAY_PORT:-4444}"
 
 # --- Fetch Shopify access token via client credentials ---
 TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"

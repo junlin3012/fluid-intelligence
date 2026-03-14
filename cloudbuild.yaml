@@ -22,7 +22,7 @@ steps:
       - '--timeout=300'
       - '--add-cloudsql-instances=junlinleather-mcp:asia-southeast1:contextforge'
       - '--set-secrets=SHOPIFY_CLIENT_ID=shopify-client-id:latest,SHOPIFY_CLIENT_SECRET=shopify-client-secret:latest,AUTH_PASSWORD=mcp-auth-passphrase:latest,JWT_SECRET_KEY=mcp-jwt-secret:latest,GOOGLE_OAUTH_CLIENT_ID=google-oauth-client-id:latest,GOOGLE_OAUTH_CLIENT_SECRET=google-oauth-client-secret:latest,CREDENTIALS_CONFIG=google-sheets-credentials:latest,DB_PASSWORD=db-password:latest'
-      - '--set-env-vars=SHOPIFY_STORE=junlinleather-5148.myshopify.com,SHOPIFY_API_VERSION=2026-01,PLATFORM_ADMIN_EMAIL=admin@junlinleather.com,EXTERNAL_URL=junlinleather.com,GOOGLE_ALLOWED_USERS=ourteam@junlinleather.com,DB_USER=contextforge,DB_NAME=contextforge,HOST=0.0.0.0,PORT=4444,GUNICORN_WORKERS=1,HTTP_SERVER=gunicorn,MCPGATEWAY_UI_ENABLED=false,MCPGATEWAY_ADMIN_API_ENABLED=true,TRANSPORT_TYPE=all,SSRF_PROTECTION_ENABLED=true,SSRF_ALLOW_LOCALHOST=true,SSRF_ALLOW_PRIVATE_NETWORKS=true,AUTH_REQUIRED=true,CACHE_TYPE=database'
+      - '--set-env-vars=SHOPIFY_STORE=junlinleather-5148.myshopify.com,SHOPIFY_API_VERSION=2026-01,PLATFORM_ADMIN_EMAIL=admin@junlinleather.com,EXTERNAL_URL=junlinleather.com,GOOGLE_ALLOWED_USERS=ourteam@junlinleather.com,DB_USER=contextforge,DB_NAME=contextforge,HOST=0.0.0.0,MCPGATEWAY_PORT=4444,GUNICORN_WORKERS=1,HTTP_SERVER=gunicorn,MCPGATEWAY_UI_ENABLED=false,MCPGATEWAY_ADMIN_API_ENABLED=true,TRANSPORT_TYPE=all,SSRF_PROTECTION_ENABLED=true,SSRF_ALLOW_LOCALHOST=true,SSRF_ALLOW_PRIVATE_NETWORKS=true,AUTH_REQUIRED=true,CACHE_TYPE=database'
       - '--allow-unauthenticated'
 
 substitutions:
