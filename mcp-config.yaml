@@ -1,0 +1,24 @@
+# mcp-config.yaml — Apollo MCP Server configuration
+server:
+  name: apollo-shopify
+  transport:
+    type: streamable_http
+    port: 8000
+  health_check:
+    path: /health
+    port: 8000
+
+shopify:
+  store: ${SHOPIFY_STORE}
+  api_version: ${SHOPIFY_API_VERSION}
+  access_token: ${SHOPIFY_ACCESS_TOKEN}
+
+operations:
+  paths:
+    - /app/graphql/customers
+    - /app/graphql/orders
+    - /app/graphql/products
+    - /app/graphql/inventory
+    - /app/graphql/fulfillments
+    - /app/graphql/metafields
+    - /app/graphql/transfers
