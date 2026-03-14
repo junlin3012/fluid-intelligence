@@ -9,7 +9,7 @@ transport:
 
 schema:
   source: local
-  path: /app/data/shopify-schema.json
+  path: /app/shopify-schema.graphql
 
 operations:
   source: local

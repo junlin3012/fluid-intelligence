@@ -48,19 +48,8 @@ for attempt in 1 2 3 4 5; do
   sleep $((attempt * 2))
 done
 
-# --- Download Shopify schema for Apollo (introspection query) ---
-echo "[fluid-intelligence] Downloading Shopify GraphQL schema..."
-INTROSPECTION='{"query":"{__schema{queryType{name}mutationType{name}types{kind name description fields(includeDeprecated:true){name description args{name description type{...T}defaultValue}type{...T}isDeprecated deprecationReason}inputFields{name description type{...T}defaultValue}interfaces{...T}enumValues(includeDeprecated:true){name description isDeprecated deprecationReason}possibleTypes{...T}}}fragment T on __Type{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name ofType{kind name}}}}}}}"}'
-curl -sf --max-time 60 -X POST \
-  "https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/graphql.json" \
-  -H "X-Shopify-Access-Token: $SHOPIFY_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "$INTROSPECTION" \
-  -o /app/data/shopify-schema.json || {
-    echo "[fluid-intelligence] FATAL: Failed to download Shopify schema"
-    exit 1
-  }
-echo "[fluid-intelligence] Schema downloaded ($(wc -c < /app/data/shopify-schema.json) bytes)"
+# Shopify schema (SDL) is baked into the image at /app/shopify-schema.graphql
+# To update: re-run introspection and convert to SDL (see CLAUDE.md)
 
 # --- Helper: start a process with early crash detection ---
 start_and_verify() {

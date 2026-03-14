@@ -39,6 +39,7 @@ COPY --from=authproxy /mcp-auth-proxy /usr/local/bin/mcp-auth-proxy
 COPY entrypoint.sh /app/entrypoint.sh
 COPY bootstrap.sh /app/bootstrap.sh
 COPY mcp-config.yaml /app/mcp-config.yaml
+COPY shopify-schema.graphql /app/shopify-schema.graphql
 COPY graphql/ /app/graphql/
 
 # Create data directory and set ownership for all app files
