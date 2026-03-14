@@ -73,12 +73,14 @@ PIDS+=($APOLLO_PID)
 start_and_verify "Apollo" $APOLLO_PID
 
 # 2. IBM ContextForge (Python, gateway core)
-# Use --port flag explicitly. Do NOT set PORT env var (Cloud Run reserves it).
-# NOTE: The `mcpgateway` entry point script fails at runtime with ModuleNotFoundError
-# even though it works at build time. Using direct Python module invocation as workaround.
-echo "[fluid-intelligence] Python path: $(/app/.venv/bin/python -c 'import sys; print(sys.path[:3])' 2>&1)"
-echo "[fluid-intelligence] mcpgateway import test: $(/app/.venv/bin/python -c 'from mcpgateway.cli import main; print("OK")' 2>&1)"
-/app/.venv/bin/python -m mcpgateway --port "$CONTEXTFORGE_PORT" --host 0.0.0.0 &
+# The `mcpgateway` entry point and `python -m mcpgateway` both fail at runtime.
+# Direct invocation of main() works since the module IS importable.
+/app/.venv/bin/python -c "
+import sys
+sys.argv = ['mcpgateway', '--port', '$CONTEXTFORGE_PORT', '--host', '0.0.0.0']
+from mcpgateway.cli import main
+main()
+" &
 CONTEXTFORGE_PID=$!
 PIDS+=($CONTEXTFORGE_PID)
 start_and_verify "ContextForge" $CONTEXTFORGE_PID
