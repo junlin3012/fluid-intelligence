@@ -34,7 +34,9 @@ RUN curl -fsSL https://github.com/krallin/tini/releases/download/v0.19.0/tini-am
 # Copy binaries and ensure execute permissions
 COPY --from=apollo-base /usr/local/bin/apollo /usr/local/bin/apollo
 COPY --from=authproxy /mcp-auth-proxy /usr/local/bin/mcp-auth-proxy
-RUN chmod +x /usr/local/bin/apollo /usr/local/bin/mcp-auth-proxy
+RUN chmod 755 /usr/local/bin/apollo /usr/local/bin/mcp-auth-proxy && \
+    ls -la /usr/local/bin/mcp-auth-proxy && \
+    file /usr/local/bin/mcp-auth-proxy
 
 # Copy config and scripts
 COPY entrypoint.sh /app/entrypoint.sh
