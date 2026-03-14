@@ -1,0 +1,5 @@
+.git
+docs
+*.md
+!mcp-config.yaml
+.DS_Store

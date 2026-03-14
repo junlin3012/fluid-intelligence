@@ -10,25 +10,25 @@ ADD https://github.com/sigbit/mcp-auth-proxy/releases/download/v2.5.4/mcp-auth-p
 RUN chmod +x /mcp-auth-proxy
 
 # Stage 3: Runtime — based on ContextForge (Red Hat UBI 10 Minimal)
-# Preserves Python 3.12 venv at /app/.venv with PATH already set
 FROM ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
 
 USER root
 
-# Install Node.js (for dev-mcp via npx) and curl (for health checks)
-RUN microdnf install -y nodejs npm curl && microdnf clean all
+# Install runtime dependencies
+RUN microdnf install -y nodejs npm curl jq && microdnf clean all
 
-# Install uv (for mcp-google-sheets via uvx)
-RUN pip install uv
+# Install uv as standalone binary (avoids venv conflicts)
+RUN curl -fsSL https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
+    | tar -xz --strip-components=1 -C /usr/local/bin
 
-# tini (PID 1 init — not in UBI repos)
-ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 /usr/local/bin/tini
-RUN chmod +x /usr/local/bin/tini
+# tini (PID 1 init)
+RUN curl -fsSL https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 \
+      -o /usr/local/bin/tini && \
+    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  /usr/local/bin/tini" | sha256sum -c - && \
+    chmod +x /usr/local/bin/tini
 
-# Copy Apollo binary
+# Copy binaries
 COPY --from=apollo-base /usr/local/bin/apollo /usr/local/bin/apollo
-
-# Copy mcp-auth-proxy binary
 COPY --from=authproxy /mcp-auth-proxy /usr/local/bin/mcp-auth-proxy
 
 # Copy config and scripts
@@ -37,9 +37,8 @@ COPY bootstrap.sh /app/bootstrap.sh
 COPY mcp-config.yaml /app/mcp-config.yaml
 COPY graphql/ /app/graphql/
 
-# Create data directory for mcp-auth-proxy BoltDB
-RUN mkdir -p /app/data && chown -R 1001:0 /app/data /app/entrypoint.sh /app/bootstrap.sh
-
+# Create data directory and set ownership for all app files
+RUN mkdir -p /app/data && chown -R 1001:0 /app
 RUN chmod +x /app/entrypoint.sh /app/bootstrap.sh
 
 USER 1001
