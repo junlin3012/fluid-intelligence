@@ -49,10 +49,10 @@ register_server() {
   return 1
 }
 
-# Wait for Apollo before registering it
+# Wait for Apollo before registering it (TCP connection check — Apollo may not have /health)
 echo "[bootstrap] Waiting for Apollo..."
 for i in $(seq 1 30); do
-  curl -sf http://localhost:8000/health > /dev/null 2>&1 && break
+  curl -s --connect-timeout 2 --max-time 3 http://localhost:8000/ -o /dev/null 2>&1 && break
   [ "$i" -eq 30 ] && { echo "[bootstrap] FATAL: Apollo not ready after 30s"; exit 1; }
   sleep 1
 done
