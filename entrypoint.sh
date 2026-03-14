@@ -22,8 +22,10 @@ export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
 export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
 
 # Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden.
-# We use --port flag for mcpgateway instead of relying on PORT env var.
+# ContextForge reads MCG_PORT (not PORT) for its listen port.
 export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
+export MCG_PORT="$CONTEXTFORGE_PORT"
+export MCG_HOST="0.0.0.0"
 
 # --- Fetch Shopify access token via client credentials ---
 TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
@@ -103,19 +105,19 @@ PIDS+=($TRANSLATE_SHEETS_PID)
 
 # --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
-for i in $(seq 1 60); do
-  if curl -sf http://localhost:${CONTEXTFORGE_PORT}/healthz > /dev/null 2>&1; then
+for i in $(seq 1 180); do
+  if curl -sf http://localhost:${CONTEXTFORGE_PORT}/health > /dev/null 2>&1; then
     echo "[fluid-intelligence] ContextForge ready after ${i}s"
     break
   fi
-  # Check if mcpgateway is still alive (fast-fail instead of 60s timeout)
+  # Check if mcpgateway is still alive (fast-fail instead of waiting full timeout)
   if ! kill -0 "$CONTEXTFORGE_PID" 2>/dev/null; then
     echo "[fluid-intelligence] FATAL: ContextForge process died during startup"
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
   fi
-  if [ "$i" -eq 60 ]; then
-    echo "[fluid-intelligence] FATAL: ContextForge not ready after 60s"
+  if [ "$i" -eq 180 ]; then
+    echo "[fluid-intelligence] FATAL: ContextForge not ready after 180s"
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
   fi
