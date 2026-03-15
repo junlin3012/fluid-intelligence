@@ -1069,6 +1069,26 @@ else
 fi
 
 # =============================================
+# MIRROR-SHINE D5: Validation completeness
+# =============================================
+echo "--- D5: Validation completeness ---"
+
+# VS_ID must be validated after extraction (empty/null = fatal)
+if grep -A5 'VS_ID=' scripts/bootstrap.sh | grep -q '"null"'; then
+  pass "bootstrap.sh validates VS_ID is not empty/null"
+else
+  fail "bootstrap.sh validates VS_ID" "no null check after VS_ID extraction"
+fi
+
+# GOOGLE_OAUTH env vars validated at startup
+if grep -q 'GOOGLE_OAUTH_CLIENT_ID:?' scripts/entrypoint.sh && \
+   grep -q 'GOOGLE_OAUTH_CLIENT_SECRET:?' scripts/entrypoint.sh; then
+  pass "entrypoint.sh validates GOOGLE_OAUTH env vars"
+else
+  fail "entrypoint.sh validates GOOGLE_OAUTH env vars" "missing required var check"
+fi
+
+# =============================================
 # MIRROR-SHINE D6: Observability gaps
 # =============================================
 echo "--- D6: Observability ---"

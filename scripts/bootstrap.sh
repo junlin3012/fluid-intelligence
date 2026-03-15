@@ -232,6 +232,12 @@ vs_body=$(echo "$vs_response" | sed '$d')
 
 if [ "$vs_code" -ge 200 ] && [ "$vs_code" -lt 300 ]; then
   VS_ID=$(echo "$vs_body" | jq -r '.id // .server.id // empty' 2>/dev/null)
+  if [ -z "$VS_ID" ] || [ "$VS_ID" = "null" ]; then
+    echo "[bootstrap] FATAL: Virtual server created (HTTP $vs_code) but could not extract ID"
+    echo "[bootstrap]   Response: $(echo "$vs_body" | head -c 300)"
+    echo "[bootstrap]   MCP clients will not be able to connect"
+    exit 1
+  fi
   echo "[bootstrap] Virtual server created (id=$VS_ID)"
   echo "[bootstrap] MCP endpoint: /servers/$VS_ID/mcp"
   echo "[bootstrap] SSE endpoint: /servers/$VS_ID/sse"
