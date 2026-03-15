@@ -106,7 +106,15 @@ done
 echo "[bootstrap] Registering google-sheets..."
 register_gateway "google-sheets" "http://localhost:8004/sse" "SSE"
 
-# Verify tools were discovered
+# Verify tools were discovered and dump debug info
 tool_count=$(curl -sf -H "Authorization: Bearer $TOKEN" \
   "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || tool_count=0
 echo "[bootstrap] All 3 backends registered, $tool_count tools discovered"
+
+# Debug: list gateways and servers
+echo "[bootstrap] Gateways:"
+curl -sf -H "Authorization: Bearer $TOKEN" "$CF/gateways" 2>/dev/null | jq -c '.[] | {name, id, url, transport}' 2>/dev/null || echo "  (none)"
+echo "[bootstrap] Servers:"
+curl -sf -H "Authorization: Bearer $TOKEN" "$CF/servers" 2>/dev/null | jq -c '.[] | {name, id}' 2>/dev/null || echo "  (none)"
+echo "[bootstrap] Tools (first 5):"
+curl -sf -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq -c '.[0:5][] | {name, id, gateway_id}' 2>/dev/null || echo "  (none)"
