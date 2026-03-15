@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+START_TIME=$(date +%s)
+elapsed() { echo $(( $(date +%s) - START_TIME )); }
+
 echo "[fluid-intelligence] Starting services..."
 
 # --- Graceful shutdown (set trap BEFORE starting processes) ---
@@ -97,7 +100,7 @@ start_and_verify() {
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
   fi
-  echo "[fluid-intelligence] $name started (PID $pid)"
+  echo "[fluid-intelligence] $name started (PID $pid) [+$(elapsed)s]"
 }
 
 # --- Start services ---
@@ -149,7 +152,7 @@ start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
 for i in $(seq 1 180); do
   if curl -sf http://127.0.0.1:${CONTEXTFORGE_PORT}/health > /dev/null 2>&1; then
-    echo "[fluid-intelligence] ContextForge ready after ${i}s"
+    echo "[fluid-intelligence] ContextForge ready after ${i}s [+$(elapsed)s]"
     break
   fi
   # Check if mcpgateway is still alive (fast-fail instead of waiting full timeout)
@@ -196,7 +199,7 @@ wait "$BOOTSTRAP_PID" || {
   exit 1
 }
 
-echo "[fluid-intelligence] All services running"
+echo "[fluid-intelligence] All services running [+$(elapsed)s]"
 echo "  Apollo bridge:  PID=$APOLLO_PID  :8000"
 echo "  ContextForge:   PID=$CONTEXTFORGE_PID  :${CONTEXTFORGE_PORT}"
 echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :8003"
@@ -216,7 +219,8 @@ for name_pid in "Apollo-bridge:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "de
   if ! kill -0 "$pid" 2>/dev/null; then
     # Get per-process exit code (wait returns 127 if already reaped)
     wait "$pid" 2>/dev/null; pid_exit=$?
-    echo "[fluid-intelligence] Process $name (PID $pid) exited (code $pid_exit)"
+    # 127 = PID already reaped by shell before wait was called
+    echo "[fluid-intelligence] Process $name (PID $pid) exited (code $pid_exit$([ "$pid_exit" -eq 127 ] && echo ', already reaped'))"
   fi
 done
 

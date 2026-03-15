@@ -71,7 +71,7 @@ register_gateway() {
       return 0
     fi
 
-    echo "[bootstrap] $name registration failed (HTTP $http_code): $body"
+    echo "[bootstrap] $name registration failed (HTTP $http_code): $(echo "$body" | head -c 200)"
     attempt=$((attempt + 1))
     sleep $attempt
   done
@@ -164,7 +164,7 @@ if [ "$vs_code" -ge 200 ] && [ "$vs_code" -lt 300 ]; then
   echo "[bootstrap] MCP endpoint: /servers/$VS_ID/mcp"
   echo "[bootstrap] SSE endpoint: /servers/$VS_ID/sse"
 else
-  echo "[bootstrap] WARNING: Virtual server creation failed (HTTP $vs_code): $vs_body"
+  echo "[bootstrap] WARNING: Virtual server creation failed (HTTP $vs_code): $(echo "$vs_body" | head -c 200)"
   echo "[bootstrap] MCP tools/list will be empty — clients cannot discover tools"
 fi
 
