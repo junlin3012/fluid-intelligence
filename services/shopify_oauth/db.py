@@ -41,6 +41,7 @@ def get_connection(dsn: str | None = None):
         user=settings.DB_USER,
         password=settings.DB_PASSWORD,
         host=settings.DB_HOST,
+        connect_timeout=5,
     )
 
 
