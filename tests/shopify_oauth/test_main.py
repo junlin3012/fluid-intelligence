@@ -98,3 +98,24 @@ def test_callback_exchanges_token(mock_shop_id, mock_webhooks, mock_store, mock_
         assert "#78401F" in r.text  # Brand color present
         mock_exchange.assert_called_once()
         mock_store.assert_called_once()
+
+@patch("services.shopify_oauth.main.exchange_code_for_token")
+def test_callback_returns_502_on_token_exchange_failure(mock_exchange):
+    """When Shopify token exchange fails, callback returns 502."""
+    mock_exchange.return_value = ("", "")
+
+    with TestClient(app, base_url="https://testserver") as session_client:
+        params = {"shop": "test-store.myshopify.com", "timestamp": str(int(time.time()))}
+        params["hmac"] = compute_hmac(params, "test_secret")
+        install_r = session_client.get("/auth/install", params=params, follow_redirects=False)
+        assert install_r.status_code == 302
+
+        location = install_r.headers["location"]
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)
+        state = qs["state"][0]
+
+        cb_params = {"shop": "test-store.myshopify.com", "code": "bad_code", "state": state, "timestamp": str(int(time.time()))}
+        cb_params["hmac"] = compute_hmac(cb_params, "test_secret")
+        r = session_client.get("/auth/callback", params=cb_params)
+        assert r.status_code == 502
+        assert "Token exchange failed" in r.text

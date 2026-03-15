@@ -41,7 +41,10 @@ async def app_uninstalled(request: Request):
     if not verify_webhook_hmac(body, hmac_header):
         return Response("Invalid HMAC", status_code=401)
 
-    data = json.loads(body)
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return Response("Invalid JSON", status_code=400)
     shop_domain = data.get("myshopify_domain", "")
     if shop_domain:
         mark_shop_uninstalled(shop_domain)
@@ -55,7 +58,10 @@ async def gdpr_webhook(topic: str, request: Request):
     if not verify_webhook_hmac(body, hmac_header):
         return Response("Invalid HMAC", status_code=401)
 
-    data = json.loads(body)
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return Response("Invalid JSON", status_code=400)
     log.info(f"GDPR webhook received: {topic}")
 
     if topic == "shop-redact":
