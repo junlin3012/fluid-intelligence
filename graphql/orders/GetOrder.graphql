@@ -16,19 +16,13 @@ query GetOrder($id: ID!) {
         currencyCode
       }
     }
-    subtotalPriceSet {
+    currentSubtotalPriceSet {
       shopMoney {
         amount
         currencyCode
       }
     }
     totalTaxSet {
-      shopMoney {
-        amount
-        currencyCode
-      }
-    }
-    totalRefundedSet {
       shopMoney {
         amount
         currencyCode
@@ -61,6 +55,9 @@ query GetOrder($id: ID!) {
             }
           }
         }
+      }
+      pageInfo {
+        hasNextPage
       }
     }
   }

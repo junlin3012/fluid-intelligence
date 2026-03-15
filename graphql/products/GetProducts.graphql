@@ -26,10 +26,7 @@ query GetProducts($first: Int = 10, $query: String) {
               id
               title
               sku
-              priceV2 {
-                amount
-                currencyCode
-              }
+              price
               inventoryQuantity
             }
           }

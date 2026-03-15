@@ -17,10 +17,7 @@ query GetProduct($id: ID!) {
           id
           title
           sku
-          priceV2 {
-            amount
-            currencyCode
-          }
+          price
           inventoryQuantity
         }
         cursor
