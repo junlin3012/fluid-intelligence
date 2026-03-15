@@ -37,6 +37,10 @@ mutation CreateDiscountCode(
                 code
               }
             }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
           }
           startsAt
           endsAt

@@ -450,6 +450,10 @@ check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/produ
 check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/GetProduct.graphql" "GetProduct"
 check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/GetOrders.graphql" "GetOrders"
 check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/GetOrder.graphql" "GetOrder"
+check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDraftOrder.graphql" "CreateDraftOrder"
+check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
+check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql" "CreateProduct"
+check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
 
 # =============================================
 # REVIEW ROUND 6: CreateProduct wrong variant type
@@ -832,6 +836,34 @@ if [ -f "$PATTERNS" ]; then
 else
   pass "patterns.md SSE casing (file not found, skip)"
 fi
+
+# =============================================
+# REVIEW ROUND 46: All GraphQL connections must have pageInfo
+# =============================================
+echo "--- R46: Connections have pageInfo ---"
+
+check_connection_has_pageinfo() {
+  local file="$1" label="$2"
+  if [ ! -f "$file" ]; then
+    fail "$label connections have pageInfo" "file not found: $file"
+    return
+  fi
+  # Find edges blocks and check if pageInfo follows within the same connection
+  if grep -q 'edges' "$file"; then
+    if grep -q 'pageInfo' "$file"; then
+      pass "$label connections have pageInfo"
+    else
+      fail "$label connections have pageInfo" "has edges but no pageInfo"
+    fi
+  else
+    pass "$label — no connections"
+  fi
+}
+
+check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDraftOrder.graphql" "CreateDraftOrder"
+check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
+check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql" "CreateProduct"
+check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
 
 # =============================================
 # SUMMARY

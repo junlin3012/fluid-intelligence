@@ -42,6 +42,10 @@ mutation CreateDraftOrder(
             }
           }
         }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
       customer {
         id

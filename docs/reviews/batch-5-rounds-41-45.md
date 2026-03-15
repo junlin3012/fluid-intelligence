@@ -1,7 +1,7 @@
-# Code Review Batch 5 — Final Sweep (Rounds 41-45)
+# Code Review Batch 5 — Final Sweep (Rounds 41-46)
 
 **Date**: 2026-03-15
-**Tests**: 92/92 unit tests passing
+**Tests**: 100/100 unit tests passing
 **E2E**: 20/21 passing (warm run) — dev-mcp operational issue only
 **Commit**: `fc53cf6` — E2E token exchange URL encoding fix
 
@@ -18,12 +18,25 @@ Final pass over every major file group to confirm zero new code-level flaws.
 | R43 | test-e2e.sh | Still running at report time |
 | R44 | Dockerfile + Dockerfile.base | All critical fixed; 2 minor new (targeted chown, drop npm) |
 | R45 | All 30 GraphQL files | **CLEAN** — 1 cosmetic naming note only |
+| R46 | GraphQL connections pageInfo | 4 connections missing `pageInfo` — all fixed |
 
-## Fixed Issues (1 fix)
+## Fixed Issues (5 fixes)
 
 | Source | Severity | Issue | Fix |
 |--------|----------|-------|-----|
 | Late R26 | Medium | Token exchange `-d` string doesn't URL-encode auth code/secrets | Replaced with `--data-urlencode` per parameter |
+| R46 | Medium | `CreateDraftOrder.graphql` lineItems connection missing `pageInfo` | Added `pageInfo { hasNextPage endCursor }` |
+| R46 | Medium | `CreateFulfillment.graphql` fulfillmentOrders connection missing `pageInfo` | Added `pageInfo { hasNextPage endCursor }` |
+| R46 | Medium | `CreateProduct.graphql` variants connection missing `pageInfo` | Added `pageInfo { hasNextPage endCursor }` |
+| R46 | Medium | `CreateDiscountCode.graphql` codes connection missing `pageInfo` | Added `pageInfo { hasNextPage endCursor }` |
+
+## R26 False Positives (verified against schema)
+
+| File | Claimed Issue | Actual Status |
+|------|--------------|---------------|
+| `AddCustomerAddress.graphql` | `MailingAddressInput` should be `CustomerAddressInput` | **Correct** — schema uses `MailingAddressInput` |
+| `CreateFulfillment.graphql` | `$trackingUrl: URL` should be `String` | **Correct** — `FulfillmentTrackingInput.url` is `URL` scalar |
+| `CreateShipment.graphql` | `$trackingUrl: URL` should be `String` | **Correct** — `InventoryShipmentTrackingInput.trackingUrl` is `URL` scalar |
 
 ## E2E Test Results (Final Deployment)
 
@@ -37,21 +50,21 @@ Final pass over every major file group to confirm zero new code-level flaws.
 
 ## Convergence Assessment
 
-After 45 review rounds across 5 batches:
+After 46 review rounds across 5 batches:
 - **Zero new critical/high code issues** found in batch 5
-- **Diminishing returns**: Agents are rediscovering already-fixed issues
-- **GraphQL**: All 30 operations verified clean
+- **Diminishing returns**: Agents are rediscovering already-fixed issues; R26 had 75% false positive rate on GraphQL type claims
+- **GraphQL**: All 30 operations verified clean — 4 missing `pageInfo` connections fixed
 - **The codebase is in good shape** for its current scope (POC/early production)
 
 ## Final Statistics
 
 | Metric | Value |
 |--------|-------|
-| Total review rounds | 45 |
-| Total code fixes applied | 22 |
-| Unit tests written | 92 |
+| Total review rounds | 46 |
+| Total code fixes applied | 26 |
+| Unit tests written | 100 |
 | E2E test pass rate | 95% (20/21) |
-| Files modified | 12 |
+| Files modified | 16 |
 | Batches | 5 |
 
 ## Remaining Tracked Items (Architectural)

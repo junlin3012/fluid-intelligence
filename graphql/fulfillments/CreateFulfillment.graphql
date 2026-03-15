@@ -40,6 +40,10 @@ mutation CreateFulfillment(
             }
           }
         }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
     }
     userErrors {

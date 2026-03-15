@@ -36,6 +36,10 @@ mutation CreateProduct(
             price
           }
         }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
       createdAt
     }
