@@ -455,6 +455,7 @@ check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/order
 check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
 check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql" "CreateProduct"
 check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
+check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
 
 # =============================================
 # REVIEW ROUND 6: CreateProduct wrong variant type
@@ -865,6 +866,7 @@ check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence
 check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
 check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql" "CreateProduct"
 check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
+check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
 
 # =============================================
 # REVIEW ROUND 47: Race condition defenses

@@ -28,6 +28,7 @@ query GetInventoryLevels($locationId: ID!, $first: Int = 50) {
       }
       pageInfo {
         hasNextPage
+        endCursor
       }
     }
   }
