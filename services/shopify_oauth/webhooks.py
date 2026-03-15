@@ -25,8 +25,10 @@ def verify_webhook_hmac(body: bytes, received_hmac: str) -> bool:
 def mark_shop_uninstalled(shop_domain: str):
     try:
         conn = get_connection()
-        mark_uninstalled(conn, shop_domain)
-        conn.close()
+        try:
+            mark_uninstalled(conn, shop_domain)
+        finally:
+            conn.close()
         log.info(f"Marked {shop_domain} as uninstalled")
     except Exception as e:
         log.error(f"Failed to mark {shop_domain} uninstalled: {e}")

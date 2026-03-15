@@ -17,7 +17,12 @@ COPY config/mcp-config.yaml /app/mcp-config.yaml
 # 3. GraphQL operations (change moderately)
 COPY graphql/ /app/graphql/
 
-# 4. Scripts (change most often during development)
+# 4. OAuth crypto module (needed by entrypoint.sh to decrypt tokens from Cloud SQL)
+COPY services/shopify_oauth/__init__.py /app/services/shopify_oauth/__init__.py
+COPY services/shopify_oauth/crypto.py /app/services/shopify_oauth/crypto.py
+RUN touch /app/services/__init__.py
+
+# 5. Scripts (change most often during development)
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 COPY scripts/bootstrap.sh /app/bootstrap.sh
 

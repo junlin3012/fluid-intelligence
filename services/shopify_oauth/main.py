@@ -30,8 +30,10 @@ app = FastAPI(title="Shopify OAuth Service")
 def startup():
     try:
         conn = get_connection()
-        ensure_table(conn)
-        conn.close()
+        try:
+            ensure_table(conn)
+        finally:
+            conn.close()
         log.info("Database table ensured")
     except Exception as e:
         log.warning(f"Could not ensure table on startup: {e}")
@@ -112,10 +114,12 @@ def callback(request: Request):
         shop_id = fetch_shop_id(shop, access_token)
         if shop_id:
             conn = get_connection()
-            with conn.cursor() as cur:
-                cur.execute("UPDATE shopify_installations SET shop_id = %s WHERE shop_domain = %s", (shop_id, shop))
-            conn.commit()
-            conn.close()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE shopify_installations SET shop_id = %s WHERE shop_domain = %s", (shop_id, shop))
+                conn.commit()
+            finally:
+                conn.close()
     except Exception as e:
         log.warning(f"Could not fetch shop_id: {e}")
 
@@ -148,8 +152,10 @@ def exchange_code_for_token(shop: str, code: str) -> tuple[str, str]:
 def store_installation(shop: str, access_token: str, scopes: str):
     encrypted = encrypt_token(access_token, settings.SHOPIFY_TOKEN_ENCRYPTION_KEY)
     conn = get_connection()
-    upsert_installation(conn, shop, encrypted, scopes)
-    conn.close()
+    try:
+        upsert_installation(conn, shop, encrypted, scopes)
+    finally:
+        conn.close()
     log.info(f"Stored installation for {shop}")
 
 

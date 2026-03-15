@@ -56,6 +56,13 @@ def test_install_rejects_bad_hmac():
     r = client.get("/auth/install", params=params)
     assert r.status_code == 401
 
+def test_install_rejects_wrong_secret_hmac():
+    """HMAC computed with wrong secret is rejected (valid hex format but wrong value)."""
+    params = {"shop": "test.myshopify.com", "timestamp": str(int(time.time()))}
+    params["hmac"] = compute_hmac(params, "wrong_secret")
+    r = client.get("/auth/install", params=params)
+    assert r.status_code == 401
+
 def test_install_rejects_stale_timestamp():
     params = {"shop": "test.myshopify.com", "timestamp": str(int(time.time()) - 600)}
     params["hmac"] = compute_hmac(params, "test_secret")
