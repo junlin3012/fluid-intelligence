@@ -1349,6 +1349,46 @@ else
 fi
 
 # =============================================
+# B14-R1: Dockerfile.base version pinning consistency
+# =============================================
+echo "--- B14-R1: Build reproducibility ---"
+
+DOCKERFILE_BASE="$REPO_ROOT/deploy/Dockerfile.base"
+if [ -f "$DOCKERFILE_BASE" ]; then
+  # uv should be version-pinned (like tini and mcp-auth-proxy are), not use /latest/
+  if grep -q 'uv/releases/latest/' "$DOCKERFILE_BASE"; then
+    fail "uv binary is version-pinned in Dockerfile.base" "uses /latest/ instead of pinned version"
+  elif grep -q 'UV_VERSION=' "$DOCKERFILE_BASE" || grep -q 'uv/releases/download/[0-9]' "$DOCKERFILE_BASE"; then
+    pass "uv binary is version-pinned in Dockerfile.base"
+  else
+    fail "uv binary is version-pinned in Dockerfile.base" "no version pinning found"
+  fi
+
+  # psycopg2-binary should be version-pinned
+  if grep -q 'psycopg2-binary==' "$DOCKERFILE_BASE"; then
+    pass "psycopg2-binary is version-pinned in Dockerfile.base"
+  else
+    fail "psycopg2-binary is version-pinned in Dockerfile.base" "unpinned pip install"
+  fi
+else
+  pass "uv binary is version-pinned (Dockerfile.base not found, skip)"
+  pass "psycopg2-binary is version-pinned (Dockerfile.base not found, skip)"
+fi
+
+# =============================================
+# B14-R3: Temp file cleanup on success path
+# =============================================
+echo "--- B14-R3: Temp file cleanup ---"
+
+ENTRYPOINT="$REPO_ROOT/scripts/entrypoint.sh"
+# On token success path, both curl-err and jq-err should be cleaned
+if grep -A5 'Shopify token acquired' "$ENTRYPOINT" | grep -q 'jq-err'; then
+  pass "jq-err temp file cleaned on token success path"
+else
+  fail "jq-err temp file cleaned on token success path" "only curl-err is cleaned, jq-err leaks"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

@@ -109,7 +109,7 @@ for attempt in 1 2 3 4 5; do
     if [ -n "$token" ]; then
       export SHOPIFY_ACCESS_TOKEN="$token"
       echo "[fluid-intelligence] Shopify token acquired (attempt $attempt)"
-      rm -f /tmp/shopify-curl-err-$$.log
+      rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log
       break
     fi
   fi
