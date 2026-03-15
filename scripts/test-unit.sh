@@ -4,6 +4,9 @@
 # Usage: ./scripts/test-unit.sh
 set -uo pipefail
 
+# Derive repo root from script location (portable — no hardcoded paths)
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 PASSED=0
 FAILED=0
 TOTAL=0
@@ -291,7 +294,7 @@ assert_eq "SIGTERM exit code = 143" "143" "$SIGTERM_EXIT"
 
 # Grep entrypoint.sh for the trap exit code — should be 143, not 0
 # Extract the exit code inside the cleanup function
-TRAP_EXIT_LINE=$(sed -n '/^cleanup()/,/^}/p' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | grep '^\s*exit ' | head -1)
+TRAP_EXIT_LINE=$(sed -n '/^cleanup()/,/^}/p' $REPO_ROOT/scripts/entrypoint.sh | grep '^\s*exit ' | head -1)
 # Extract just the number right after "exit "
 TRAP_EXIT=$(echo "$TRAP_EXIT_LINE" | sed 's/.*exit \([0-9]*\).*/\1/')
 assert_eq "Trap exits with 143 (not 0)" "143" "$TRAP_EXIT"
@@ -303,12 +306,12 @@ echo "--- R1: BOOTSTRAP_PID cleanup ---"
 
 # After bootstrap completes, its PID should be removed from PIDS
 # Check that entrypoint.sh removes BOOTSTRAP_PID after wait completes
-BOOTSTRAP_CLEANUP=$(grep -c 'BOOTSTRAP_PID' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | head -1)
+BOOTSTRAP_CLEANUP=$(grep -c 'BOOTSTRAP_PID' $REPO_ROOT/scripts/entrypoint.sh | head -1)
 # After the wait block, there should be a line that removes BOOTSTRAP_PID from PIDS
-HAS_PID_REMOVAL=$(grep -c 'PIDS.*BOOTSTRAP_PID' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh 2>/dev/null || echo 0)
+HAS_PID_REMOVAL=$(grep -c 'PIDS.*BOOTSTRAP_PID' $REPO_ROOT/scripts/entrypoint.sh 2>/dev/null || echo 0)
 # Should have at least one line that filters/removes BOOTSTRAP_PID
 # We want: PIDS that are set to exclude BOOTSTRAP_PID AFTER the wait block
-REMOVES_BOOTSTRAP=$(sed -n '/wait.*BOOTSTRAP_PID/,/All services/p' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | grep -c 'PIDS=' || echo "0")
+REMOVES_BOOTSTRAP=$(sed -n '/wait.*BOOTSTRAP_PID/,/All services/p' $REPO_ROOT/scripts/entrypoint.sh | grep -c 'PIDS=' || echo "0")
 if [ "$REMOVES_BOOTSTRAP" -gt 0 ]; then
   pass "BOOTSTRAP_PID removed from PIDS after completion"
 else
@@ -321,7 +324,7 @@ fi
 echo "--- R1: cleanup waits on tracked PIDs ---"
 
 # The cleanup function should wait on each PID individually, not bare `wait`
-CLEANUP_BODY=$(sed -n '/^cleanup()/,/^}/p' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh)
+CLEANUP_BODY=$(sed -n '/^cleanup()/,/^}/p' $REPO_ROOT/scripts/entrypoint.sh)
 # Check: has `wait "$pid"` (per-PID wait) and NOT bare `wait` without arguments
 HAS_PER_PID_WAIT=$(echo "$CLEANUP_BODY" | grep -c 'wait "\$pid"' || true)
 HAS_PER_PID_WAIT=${HAS_PER_PID_WAIT:-0}
@@ -340,7 +343,7 @@ echo "--- R4: DB_PASSWORD URL-encoding ---"
 
 # DATABASE_URL should URL-encode DB_PASSWORD to handle special chars
 # Check if DATABASE_URL construction includes URL-encoding of DB_PASSWORD
-HAS_URL_ENCODE=$(grep -B2 'DATABASE_URL=' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | grep -c 'urllib.parse.quote\|urlencode\|encoded_pw\|percent_encode' 2>/dev/null || echo 0)
+HAS_URL_ENCODE=$(grep -B2 'DATABASE_URL=' $REPO_ROOT/scripts/entrypoint.sh | grep -c 'urllib.parse.quote\|urlencode\|encoded_pw\|percent_encode' 2>/dev/null || echo 0)
 if [ "$HAS_URL_ENCODE" -gt 0 ]; then
   pass "DB_PASSWORD is URL-encoded in DATABASE_URL"
 else
@@ -371,7 +374,7 @@ validate_external_url ".leading-dot.com" && fail "Leading dot" "accepted" || pas
 validate_external_url "-leading-hyphen.com" && fail "Leading hyphen" "accepted" || pass "Leading hyphen rejected"
 
 # Now test that the CURRENT code in entrypoint.sh uses the strict regex
-CURRENT_REGEX=$(grep 'EXTERNAL_URL.*=~' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | head -1)
+CURRENT_REGEX=$(grep 'EXTERNAL_URL.*=~' $REPO_ROOT/scripts/entrypoint.sh | head -1)
 if echo "$CURRENT_REGEX" | grep -q '\[a-zA-Z0-9\]\[a-zA-Z0-9'; then
   pass "EXTERNAL_URL regex requires alphanumeric label start"
 else
@@ -390,7 +393,7 @@ ID_COUNT=$(echo "$MULTI_IDS" | wc -l | tr -d ' ')
 if [ "$ID_COUNT" -gt 1 ]; then
   # The current code only deletes one ID — this is the bug
   # Check if bootstrap.sh handles multiple IDs
-  HANDLES_MULTI=$(grep -c 'while read' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh 2>/dev/null || echo 0)
+  HANDLES_MULTI=$(grep -c 'while read' $REPO_ROOT/scripts/bootstrap.sh 2>/dev/null || echo 0)
   if [ "$HANDLES_MULTI" -gt 0 ]; then
     pass "Bootstrap handles multiple gateway IDs"
   else
@@ -407,12 +410,12 @@ echo "--- R3: RETURNED_STATE initialization ---"
 
 # test-e2e.sh uses RETURNED_STATE at line 135 but it's only set inside a conditional block
 # Under set -uo pipefail, this would cause an unbound variable error
-HAS_INIT=$(grep -c 'RETURNED_STATE=""' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh 2>/dev/null || echo 0)
+HAS_INIT=$(grep -c 'RETURNED_STATE=""' $REPO_ROOT/scripts/test-e2e.sh 2>/dev/null || echo 0)
 if [ "$HAS_INIT" -gt 0 ]; then
   pass "RETURNED_STATE initialized before conditional use"
 else
   # Check if it uses ${RETURNED_STATE:-} syntax
-  HAS_DEFAULT=$(grep -c 'RETURNED_STATE:-' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh 2>/dev/null || echo 0)
+  HAS_DEFAULT=$(grep -c 'RETURNED_STATE:-' $REPO_ROOT/scripts/test-e2e.sh 2>/dev/null || echo 0)
   if [ "$HAS_DEFAULT" -gt 0 ]; then
     pass "RETURNED_STATE uses default syntax"
   else
@@ -442,22 +445,22 @@ check_endcursor() {
   fi
 }
 
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/GetProducts.graphql" "GetProducts"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/GetProduct.graphql" "GetProduct"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/GetOrders.graphql" "GetOrders"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/GetOrder.graphql" "GetOrder"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDraftOrder.graphql" "CreateDraftOrder"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql" "CreateProduct"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
-check_endcursor "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
+check_endcursor "$REPO_ROOT/graphql/products/GetProducts.graphql" "GetProducts"
+check_endcursor "$REPO_ROOT/graphql/products/GetProduct.graphql" "GetProduct"
+check_endcursor "$REPO_ROOT/graphql/orders/GetOrders.graphql" "GetOrders"
+check_endcursor "$REPO_ROOT/graphql/orders/GetOrder.graphql" "GetOrder"
+check_endcursor "$REPO_ROOT/graphql/orders/CreateDraftOrder.graphql" "CreateDraftOrder"
+check_endcursor "$REPO_ROOT/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
+check_endcursor "$REPO_ROOT/graphql/products/CreateProduct.graphql" "CreateProduct"
+check_endcursor "$REPO_ROOT/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
+check_endcursor "$REPO_ROOT/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
 
 # =============================================
 # REVIEW ROUND 6: CreateProduct wrong variant type
 # =============================================
 echo "--- R6: CreateProduct variant input type ---"
 
-PROD_FILE="/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql"
+PROD_FILE="$REPO_ROOT/graphql/products/CreateProduct.graphql"
 if [ -f "$PROD_FILE" ]; then
   if grep -q 'ProductVariantSetInput' "$PROD_FILE"; then
     pass "CreateProduct uses correct variant type (ProductVariantSetInput)"
@@ -473,7 +476,7 @@ fi
 # =============================================
 echo "--- R6: CreateDiscountCode context field ---"
 
-DISC_FILE="/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql"
+DISC_FILE="$REPO_ROOT/graphql/orders/CreateDiscountCode.graphql"
 if [ -f "$DISC_FILE" ]; then
   if grep -q 'customerSelection' "$DISC_FILE"; then
     fail "CreateDiscountCode uses context (not deprecated customerSelection)" "still using deprecated customerSelection"
@@ -492,7 +495,7 @@ echo "--- R7: Bootstrap bridge liveness checks ---"
 # bootstrap.sh should check if bridge processes are alive during wait loops
 # Currently it doesn't — if a bridge crashes, it waits the full timeout
 # Check for kill -0 in bootstrap wait loops (not in register_gateway which is different)
-HAS_LIVENESS=$(grep -c 'kill -0' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh 2>/dev/null || echo 0)
+HAS_LIVENESS=$(grep -c 'kill -0' $REPO_ROOT/scripts/bootstrap.sh 2>/dev/null || echo 0)
 if [ "$HAS_LIVENESS" -gt 0 ]; then
   pass "Bootstrap checks bridge process liveness"
 else
@@ -505,7 +508,7 @@ fi
 echo "--- R11: curl --connect-timeout on health poll ---"
 
 # The ContextForge health poll should have --connect-timeout to avoid one hung connect exhausting the 120s budget
-CF_HEALTH_CURL=$(grep 'CONTEXTFORGE_PORT.*health' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | head -1)
+CF_HEALTH_CURL=$(grep 'CONTEXTFORGE_PORT.*health' $REPO_ROOT/scripts/entrypoint.sh | head -1)
 if echo "$CF_HEALTH_CURL" | grep -q 'connect-timeout'; then
   pass "ContextForge health poll has --connect-timeout"
 else
@@ -519,7 +522,7 @@ echo "--- R14: env var validation ordering ---"
 
 # DB_PASSWORD is used for URL-encoding (python3 line) BEFORE the `: "${DB_PASSWORD:?...}"` check
 # The validation should come BEFORE the DATABASE_URL construction
-ENTRYPOINT="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh"
+ENTRYPOINT="$REPO_ROOT/scripts/entrypoint.sh"
 ENCODE_LINE=$(grep -n 'encoded_pw\|urllib.*DB_PASSWORD' "$ENTRYPOINT" | head -1 | cut -d: -f1)
 VALIDATE_LINE=$(grep -n 'DB_PASSWORD:?' "$ENTRYPOINT" | head -1 | cut -d: -f1)
 if [ -n "$ENCODE_LINE" ] && [ -n "$VALIDATE_LINE" ]; then
@@ -593,7 +596,7 @@ fi
 echo "--- R12: Variable quoting in bootstrap ---"
 
 # $attempt and $max_attempts should be quoted in [ ] test
-UNQUOTED_TEST=$(grep 'while \[' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | head -1)
+UNQUOTED_TEST=$(grep 'while \[' $REPO_ROOT/scripts/bootstrap.sh | head -1)
 if echo "$UNQUOTED_TEST" | grep -qE '\$attempt\b' && ! echo "$UNQUOTED_TEST" | grep -q '"\$attempt"'; then
   fail "bootstrap while-test quotes variables" "\$attempt unquoted in [ ] test — word splitting risk"
 else
@@ -601,7 +604,7 @@ else
 fi
 
 # sleep $attempt should be quoted
-UNQUOTED_SLEEP=$(grep 'sleep \$attempt' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | head -1)
+UNQUOTED_SLEEP=$(grep 'sleep \$attempt' $REPO_ROOT/scripts/bootstrap.sh | head -1)
 if [ -n "$UNQUOTED_SLEEP" ] && ! echo "$UNQUOTED_SLEEP" | grep -q 'sleep "\$'; then
   fail "bootstrap sleep quotes variable" "sleep \$attempt unquoted"
 else
@@ -613,7 +616,7 @@ fi
 # =============================================
 echo "--- R18: Dockerfile permissions ---"
 
-DOCKERFILE="/Users/junlin/Projects/Shopify/fluid-intelligence/deploy/Dockerfile"
+DOCKERFILE="$REPO_ROOT/deploy/Dockerfile"
 # Scripts must be made executable (either via COPY --chmod or RUN chmod)
 if grep -q 'chmod.*755.*entrypoint' "$DOCKERFILE" || grep -q 'COPY --chmod=755' "$DOCKERFILE"; then
   pass "Dockerfile sets script permissions (chmod 755 or COPY --chmod)"
@@ -644,7 +647,7 @@ fi
 # =============================================
 echo "--- R16: MCP negative tests ---"
 
-E2E="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh"
+E2E="$REPO_ROOT/scripts/test-e2e.sh"
 # Should have a test for invalid JSON-RPC method
 HAS_INVALID_METHOD=$(grep -cE 'nonexistent|invalid.*method|Method Not Found|-32601' "$E2E" 2>/dev/null) || HAS_INVALID_METHOD=0
 if [ "$HAS_INVALID_METHOD" -gt 0 ]; then
@@ -695,7 +698,7 @@ fi
 # =============================================
 echo "--- R22: register_gateway FATAL includes HTTP context ---"
 
-BOOTSTRAP="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh"
+BOOTSTRAP="$REPO_ROOT/scripts/bootstrap.sh"
 REG_FATAL=$(grep 'FATAL.*Failed to register' "$BOOTSTRAP")
 if echo "$REG_FATAL" | grep -qE 'http_code|HTTP|body'; then
   pass "register_gateway FATAL includes HTTP context"
@@ -733,7 +736,7 @@ fi
 # =============================================
 echo "--- R24: mcp_post error visibility ---"
 
-E2E="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh"
+E2E="$REPO_ROOT/scripts/test-e2e.sh"
 MCP_POST_DEF=$(sed -n '/^mcp_post()/,/^}/p' "$E2E")
 # Check curl command line (not comments) for -sf or -f flags
 if echo "$MCP_POST_DEF" | grep -v '^[[:space:]]*#' | grep -qE 'curl.*-[a-z]*f'; then
@@ -771,7 +774,7 @@ fi
 # =============================================
 echo "--- R30: Documentation accuracy ---"
 
-PATTERNS="/Users/junlin/Projects/Shopify/fluid-intelligence/docs/agent-behavior/patterns.md"
+PATTERNS="$REPO_ROOT/docs/agent-behavior/patterns.md"
 if [ -f "$PATTERNS" ]; then
   JWT_DOC=$(grep -i 'short.*lived.*min' "$PATTERNS" 2>/dev/null || true)
   if echo "$JWT_DOC" | grep -q '5 min'; then
@@ -788,7 +791,7 @@ fi
 # =============================================
 echo "--- R31: Supply chain security ---"
 
-DOCKERFILE_BASE="/Users/junlin/Projects/Shopify/fluid-intelligence/deploy/Dockerfile.base"
+DOCKERFILE_BASE="$REPO_ROOT/deploy/Dockerfile.base"
 if [ -f "$DOCKERFILE_BASE" ]; then
   if grep -q 'mcp-auth-proxy' "$DOCKERFILE_BASE" && grep -q 'sha256sum' "$DOCKERFILE_BASE"; then
     pass "mcp-auth-proxy binary has SHA-256 checksum verification"
@@ -804,7 +807,7 @@ fi
 # =============================================
 echo "--- R32: Cloud Run config ---"
 
-CLOUDBUILD="/Users/junlin/Projects/Shopify/fluid-intelligence/deploy/cloudbuild.yaml"
+CLOUDBUILD="$REPO_ROOT/deploy/cloudbuild.yaml"
 if grep -q 'PYTHONUNBUFFERED=1' "$CLOUDBUILD"; then
   pass "PYTHONUNBUFFERED=1 set in Cloud Run env vars"
 else
@@ -822,7 +825,7 @@ fi
 # =============================================
 echo "--- R33: Documentation consistency ---"
 
-PATTERNS="/Users/junlin/Projects/Shopify/fluid-intelligence/docs/agent-behavior/patterns.md"
+PATTERNS="$REPO_ROOT/docs/agent-behavior/patterns.md"
 if [ -f "$PATTERNS" ]; then
   LOWERCASE_SSE=$(grep -c '`sse`' "$PATTERNS" 2>/dev/null) || LOWERCASE_SSE=0
   if [ "$LOWERCASE_SSE" -gt 0 ]; then
@@ -857,11 +860,11 @@ check_connection_has_pageinfo() {
   fi
 }
 
-check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDraftOrder.graphql" "CreateDraftOrder"
-check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
-check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql" "CreateProduct"
-check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
-check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
+check_connection_has_pageinfo "$REPO_ROOT/graphql/orders/CreateDraftOrder.graphql" "CreateDraftOrder"
+check_connection_has_pageinfo "$REPO_ROOT/graphql/fulfillments/CreateFulfillment.graphql" "CreateFulfillment"
+check_connection_has_pageinfo "$REPO_ROOT/graphql/products/CreateProduct.graphql" "CreateProduct"
+check_connection_has_pageinfo "$REPO_ROOT/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
+check_connection_has_pageinfo "$REPO_ROOT/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
 
 # =============================================
 # REVIEW ROUND 47: Race condition defenses
@@ -869,14 +872,14 @@ check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence
 echo "--- R47: Race condition defenses ---"
 
 # Bash version guard
-if grep -q 'BASH_VERSINFO' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh; then
+if grep -q 'BASH_VERSINFO' $REPO_ROOT/scripts/entrypoint.sh; then
   pass "entrypoint.sh has bash version guard"
 else
   fail "entrypoint.sh has bash version guard" "no BASH_VERSINFO check found"
 fi
 
 # Trap-responsive sleep (sleep & wait pattern)
-if grep -A1 'sleep 2' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | grep -q 'wait'; then
+if grep -A1 'sleep 2' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'wait'; then
   pass "start_and_verify sleep is trap-responsive"
 else
   fail "start_and_verify sleep is trap-responsive" "sleep 2 not followed by wait (SIGTERM blocked during sleep)"
@@ -888,7 +891,7 @@ fi
 echo "--- R48: Error handling ---"
 
 # Bridge processes use venv python
-BRIDGE_PYTHON_COUNT=$(grep -c '/app/.venv/bin/python -m mcpgateway.translate' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh) || BRIDGE_PYTHON_COUNT=0
+BRIDGE_PYTHON_COUNT=$(grep -c '/app/.venv/bin/python -m mcpgateway.translate' $REPO_ROOT/scripts/entrypoint.sh) || BRIDGE_PYTHON_COUNT=0
 if [ "$BRIDGE_PYTHON_COUNT" -eq 3 ]; then
   pass "All 3 bridges use venv python"
 else
@@ -896,7 +899,7 @@ else
 fi
 
 # No bare python3 for mcpgateway.translate
-BARE_PYTHON_COUNT=$(grep -cE '^python3 -m mcpgateway' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh) || BARE_PYTHON_COUNT=0
+BARE_PYTHON_COUNT=$(grep -cE '^python3 -m mcpgateway' $REPO_ROOT/scripts/entrypoint.sh) || BARE_PYTHON_COUNT=0
 if [ "$BARE_PYTHON_COUNT" -eq 0 ]; then
   pass "No bare python3 for mcpgateway.translate"
 else
@@ -904,15 +907,15 @@ else
 fi
 
 # DELETE operations log HTTP status
-if grep -q 'DELETE.*gateway' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh && \
-   grep -q 'WARNING.*DELETE.*gateway' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh; then
+if grep -q 'DELETE.*gateway' $REPO_ROOT/scripts/bootstrap.sh && \
+   grep -q 'WARNING.*DELETE.*gateway' $REPO_ROOT/scripts/bootstrap.sh; then
   pass "bootstrap.sh logs DELETE gateway failures"
 else
   fail "bootstrap.sh logs DELETE gateway failures" "DELETE failures silently swallowed"
 fi
 
 # gcloud stderr not discarded in test-e2e.sh
-if grep -A2 'gcloud secrets' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh | grep -q 'gcloud_err\|gcloud error'; then
+if grep -A2 'gcloud secrets' $REPO_ROOT/scripts/test-e2e.sh | grep -q 'gcloud_err\|gcloud error'; then
   pass "test-e2e.sh surfaces gcloud errors"
 else
   fail "test-e2e.sh surfaces gcloud errors" "gcloud stderr still discarded"
@@ -924,7 +927,7 @@ fi
 echo "--- R49: curl patterns ---"
 
 # test-e2e.sh should not use 2>&1 on curl calls that capture JSON
-E2E_CURL_2REDIR=$(grep -c 'curl.*2>&1' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh) || E2E_CURL_2REDIR=0
+E2E_CURL_2REDIR=$(grep -c 'curl.*2>&1' $REPO_ROOT/scripts/test-e2e.sh) || E2E_CURL_2REDIR=0
 if [ "$E2E_CURL_2REDIR" -eq 0 ]; then
   pass "test-e2e.sh no curl 2>&1 contamination"
 else
@@ -932,8 +935,8 @@ else
 fi
 
 # bootstrap.sh all curl calls have --connect-timeout
-BOOT_CURL_TOTAL=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -v 'echo\|FATAL' | grep -c 'curl ') || BOOT_CURL_TOTAL=0
-BOOT_CURL_TIMEOUT=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -v 'echo\|FATAL' | grep -c 'connect-timeout') || BOOT_CURL_TIMEOUT=0
+BOOT_CURL_TOTAL=$(grep -v '^[[:space:]]*#' $REPO_ROOT/scripts/bootstrap.sh | grep -v 'echo\|FATAL' | grep -c 'curl ') || BOOT_CURL_TOTAL=0
+BOOT_CURL_TIMEOUT=$(grep -v '^[[:space:]]*#' $REPO_ROOT/scripts/bootstrap.sh | grep -v 'echo\|FATAL' | grep -c 'connect-timeout') || BOOT_CURL_TIMEOUT=0
 if [ "$BOOT_CURL_TOTAL" -eq "$BOOT_CURL_TIMEOUT" ]; then
   pass "bootstrap.sh all $BOOT_CURL_TOTAL curl calls have --connect-timeout"
 else
@@ -946,14 +949,14 @@ fi
 echo "--- R50: PID array + token guard ---"
 
 # PIDS cleanup uses exact match (not substring replacement)
-if grep -A3 'Remove completed bootstrap' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | grep -q 'for p in'; then
+if grep -A3 'Remove completed bootstrap' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'for p in'; then
   pass "PIDS cleanup uses exact match loop"
 else
   fail "PIDS cleanup uses exact match loop" "still using substring replacement (corrupts PIDs)"
 fi
 
 # Post-loop token guard
-if grep -q 'SHOPIFY_ACCESS_TOKEN:?' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh; then
+if grep -q 'SHOPIFY_ACCESS_TOKEN:?' $REPO_ROOT/scripts/entrypoint.sh; then
   pass "SHOPIFY_ACCESS_TOKEN has post-loop guard"
 else
   fail "SHOPIFY_ACCESS_TOKEN has post-loop guard" "no guard after token fetch loop"
@@ -1211,6 +1214,75 @@ validate_jwt_format "has+plus.in.token" && fail "JWT format: plus sign" "accepte
 validate_jwt_format "" && fail "JWT format: empty" "accepted" || pass "JWT format rejects empty"
 validate_jwt_format "WARNING: something
 eyJ.eyJ.sig" && fail "JWT format: multiline (Python warning)" "accepted" || pass "JWT format rejects multiline"
+
+# =============================================
+# B8: Curl exit code capture consistency
+# =============================================
+echo "--- B8: Curl exit code capture ---"
+
+# Dev-mcp and sheets wait loops should capture curl exit code in $rc (like Apollo does)
+# Previously used bare $? which gets overwritten by the [ ] test
+if grep 'curl.*8003.*healthz' scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
+  pass "dev-mcp wait captures curl exit code in \$rc"
+else
+  fail "dev-mcp wait captures curl exit code in \$rc" "uses bare \$? (overwritten by [ ] test)"
+fi
+
+if grep 'curl.*8004.*healthz' scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
+  pass "sheets wait captures curl exit code in \$rc"
+else
+  fail "sheets wait captures curl exit code in \$rc" "uses bare \$? (overwritten by [ ] test)"
+fi
+
+# register_gateway cleans up temp file on success path (rm before echo)
+if grep -B2 'Registered.*via /gateways' scripts/bootstrap.sh | grep -q 'rm -f.*curl_err'; then
+  pass "register_gateway cleans temp file on success"
+else
+  fail "register_gateway cleans temp file on success" "orphaned temp files on success path"
+fi
+
+if grep -B2 'already exists (409)' scripts/bootstrap.sh | grep -q 'rm -f.*curl_err'; then
+  pass "register_gateway cleans temp file on 409"
+else
+  fail "register_gateway cleans temp file on 409" "orphaned temp files on 409 path"
+fi
+
+# =============================================
+# B8-R10: Test portability (no hardcoded paths)
+# =============================================
+echo "--- B8-R10: Test portability ---"
+
+# Tests should use $REPO_ROOT, not hardcoded absolute paths
+# Exclude the self-referencing grep line from the count
+HARDCODED_COUNT=$(grep -c '/Users/junlin' scripts/test-unit.sh || true)
+# Subtract 1 for this grep line itself
+HARDCODED_COUNT=$((HARDCODED_COUNT > 0 ? HARDCODED_COUNT - 1 : 0))
+if [ "$HARDCODED_COUNT" -eq 0 ]; then
+  pass "No hardcoded absolute paths in test-unit.sh"
+else
+  fail "No hardcoded absolute paths in test-unit.sh" "$HARDCODED_COUNT hardcoded paths found"
+fi
+
+# REPO_ROOT should be defined near the top of the file
+if head -10 scripts/test-unit.sh | grep -q 'REPO_ROOT='; then
+  pass "REPO_ROOT variable defined for portable paths"
+else
+  fail "REPO_ROOT variable defined for portable paths" "tests use hardcoded paths"
+fi
+
+# B8-R9: register_gateway variables should be local
+if grep -A2 'local max_attempts' scripts/bootstrap.sh | grep -q 'payload.*response.*body'; then
+  pass "register_gateway declares payload/response/body as local"
+else
+  fail "register_gateway declares payload/response/body as local" "variables leak to global scope"
+fi
+
+# B8-R8: Virtual server creation captures curl stderr
+if grep -B3 'CF/servers.*2>' scripts/bootstrap.sh | grep -q 'vs_curl_err'; then
+  pass "POST /servers captures curl stderr for diagnostics"
+else
+  fail "POST /servers captures curl stderr for diagnostics" "curl errors lost with 2>/dev/null"
+fi
 
 # =============================================
 # SUMMARY

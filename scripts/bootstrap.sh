@@ -80,7 +80,7 @@ register_gateway() {
     done
   fi
 
-  local max_attempts=3 attempt=1 http_code=0
+  local max_attempts=3 attempt=1 http_code=0 payload response body
   while [ "$attempt" -le "$max_attempts" ]; do
     payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
       '{name: $n, url: $u, transport: $t}')
@@ -94,12 +94,14 @@ register_gateway() {
     body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+      rm -f "$curl_err"
       echo "[bootstrap] Registered $name via /gateways (tools auto-discovered)"
       return 0
     fi
 
     # 409 = already exists
     if [ "$http_code" -eq 409 ]; then
+      rm -f "$curl_err"
       echo "[bootstrap] $name already exists (409)"
       return 0
     fi
@@ -150,8 +152,9 @@ for i in $(seq 1 90); do
       exit 1
     fi
   fi
-  curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/healthz > /dev/null 2>&1 && break
-  [ "$i" -eq 90 ] && { echo "[bootstrap] FATAL: dev-mcp bridge not ready after 90s (last curl rc=$?)"; exit 1; }
+  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/healthz > /dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] && break
+  [ "$i" -eq 90 ] && { echo "[bootstrap] FATAL: dev-mcp bridge not ready after 90s (last curl rc=$rc)"; exit 1; }
   sleep 1
 done
 
@@ -169,8 +172,9 @@ for i in $(seq 1 60); do
       exit 1
     fi
   fi
-  curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8004/healthz > /dev/null 2>&1 && break
-  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: google-sheets bridge not ready after 60s (last curl rc=$?)"; exit 1; }
+  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8004/healthz > /dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] && break
+  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: google-sheets bridge not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
 done
 
@@ -231,11 +235,12 @@ fi
 # Create virtual server with all tools
 vs_payload=$(jq -n --argjson tools "$TOOL_IDS" \
   '{server: {name: "fluid-intelligence", description: "All Shopify + Google Sheets tools", associated_tools: $tools}}')
+vs_curl_err="/tmp/bootstrap-vs-curl-err-$$.log"
 vs_response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$vs_payload" \
-  "$CF/servers" 2>/dev/null)
+  "$CF/servers" 2>"$vs_curl_err")
 vs_code=$(parse_http_code "$vs_response")
 vs_body=$(echo "$vs_response" | sed '$d')
 
@@ -247,11 +252,14 @@ if [ "$vs_code" -ge 200 ] && [ "$vs_code" -lt 300 ]; then
     echo "[bootstrap]   MCP clients will not be able to connect"
     exit 1
   fi
+  rm -f "$vs_curl_err"
   echo "[bootstrap] Virtual server created (id=$VS_ID)"
   echo "[bootstrap] MCP endpoint: /servers/$VS_ID/mcp"
   echo "[bootstrap] SSE endpoint: /servers/$VS_ID/sse"
 else
   echo "[bootstrap] FATAL: Virtual server creation failed (HTTP $vs_code): $(echo "$vs_body" | head -c 200)"
+  [ -s "$vs_curl_err" ] && echo "[bootstrap]   curl error: $(cat "$vs_curl_err")"
+  rm -f "$vs_curl_err"
   echo "[bootstrap] MCP tools/list will be empty — clients cannot discover tools"
   exit 1
 fi
