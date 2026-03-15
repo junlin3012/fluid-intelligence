@@ -53,7 +53,7 @@ register_gateway() {
   fi
 
   local max_attempts=3 attempt=1 http_code=0
-  while [ $attempt -le $max_attempts ]; do
+  while [ "$attempt" -le "$max_attempts" ]; do
     payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
       '{name: $n, url: $u, transport: $t}')
     response=$(curl -s -w "\n%{http_code}" --max-time 10 -X POST \
@@ -77,7 +77,7 @@ register_gateway() {
 
     echo "[bootstrap] $name registration failed (HTTP $http_code): $(echo "$body" | head -c 200)"
     attempt=$((attempt + 1))
-    sleep $attempt
+    sleep "$attempt"
   done
 
   echo "[bootstrap] FATAL: Failed to register $name after $max_attempts attempts"

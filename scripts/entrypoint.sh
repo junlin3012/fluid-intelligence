@@ -22,21 +22,7 @@ cleanup() {
 }
 trap cleanup SIGTERM SIGINT
 
-# --- Env var wiring ---
-# URL-encode DB_PASSWORD to handle special chars (@, ?, /, %) that break connection strings
-encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))")
-export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
-export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
-export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
-export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
-
-# Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden.
-# ContextForge reads MCG_PORT (not PORT) for its listen port.
-export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
-export MCG_PORT="$CONTEXTFORGE_PORT"
-export MCG_HOST="0.0.0.0"
-
-# --- Validate required env vars ---
+# --- Validate required env vars (BEFORE any use, especially DB_PASSWORD in URL encoding) ---
 : "${SHOPIFY_API_VERSION:?SHOPIFY_API_VERSION must be set (e.g., 2026-01)}"
 : "${DB_PASSWORD:?DB_PASSWORD must be set}"
 : "${SHOPIFY_CLIENT_ID:?SHOPIFY_CLIENT_ID must be set}"
@@ -51,13 +37,27 @@ if ! [[ "$SHOPIFY_STORE" =~ ^[a-zA-Z0-9._-]+\.myshopify\.com$ ]]; then
   exit 1
 fi
 if ! [[ "${MCPGATEWAY_PORT:-4444}" =~ ^[0-9]+$ ]]; then
-  echo "[fluid-intelligence] FATAL: MCPGATEWAY_PORT must be numeric"
+  echo "[fluid-intelligence] FATAL: MCPGATEWAY_PORT must be numeric, got: ${MCPGATEWAY_PORT:-4444}"
   exit 1
 fi
 if [[ -n "${EXTERNAL_URL:-}" ]] && ! [[ "$EXTERNAL_URL" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*(\.[a-zA-Z0-9][a-zA-Z0-9_-]*)+$ ]]; then
-  echo "[fluid-intelligence] FATAL: EXTERNAL_URL contains invalid characters"
+  echo "[fluid-intelligence] FATAL: EXTERNAL_URL contains invalid characters, got: $EXTERNAL_URL"
   exit 1
 fi
+
+# --- Env var wiring ---
+# URL-encode DB_PASSWORD to handle special chars (@, ?, /, %) that break connection strings
+encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))")
+export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
+export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
+export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
+export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
+
+# Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden.
+# ContextForge reads MCG_PORT (not PORT) for its listen port.
+export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
+export MCG_PORT="$CONTEXTFORGE_PORT"
+export MCG_HOST="0.0.0.0"
 
 # --- Fetch Shopify access token via client credentials ---
 TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
@@ -85,6 +85,7 @@ for attempt in 1 2 3 4 5; do
   if [ "$attempt" -eq 5 ]; then
     echo "[fluid-intelligence] FATAL: Could not fetch Shopify access token after 5 attempts"
     echo "[fluid-intelligence]   Last HTTP status: $http_code"
+    echo "[fluid-intelligence]   Response body: $(echo "$body" | head -c 500)"
     [ -f /tmp/shopify-curl-err-$$.log ] && echo "[fluid-intelligence]   curl stderr: $(cat /tmp/shopify-curl-err-$$.log)"
     rm -f /tmp/shopify-curl-err-$$.log
     exit 1
@@ -160,7 +161,7 @@ start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 # --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
 for i in $(seq 1 180); do
-  if curl -sf http://127.0.0.1:${CONTEXTFORGE_PORT}/health > /dev/null 2>&1; then
+  if curl -sf --connect-timeout 2 --max-time 5 http://127.0.0.1:${CONTEXTFORGE_PORT}/health > /dev/null 2>&1; then
     echo "[fluid-intelligence] ContextForge ready after ${i}s [+$(elapsed)s]"
     break
   fi
@@ -233,7 +234,7 @@ for name_pid in "Apollo-bridge:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "de
     # Get per-process exit code (wait returns 127 if already reaped)
     wait "$pid" 2>/dev/null; pid_exit=$?
     # 127 = PID already reaped by shell before wait was called
-    echo "[fluid-intelligence] Process $name (PID $pid) exited (code $pid_exit$([ "$pid_exit" -eq 127 ] && echo ', already reaped'))"
+    echo "[fluid-intelligence] FATAL: Process $name (PID $pid) exited (code $pid_exit$([ "$pid_exit" -eq 127 ] && echo ', already reaped'))"
   fi
 done
 

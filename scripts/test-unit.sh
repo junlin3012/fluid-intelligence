@@ -499,6 +499,167 @@ else
 fi
 
 # =============================================
+# REVIEW ROUND 11: ContextForge health poll --connect-timeout
+# =============================================
+echo "--- R11: curl --connect-timeout on health poll ---"
+
+# The ContextForge health poll should have --connect-timeout to avoid one hung connect exhausting the 180s budget
+CF_HEALTH_CURL=$(grep 'CONTEXTFORGE_PORT.*health' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | head -1)
+if echo "$CF_HEALTH_CURL" | grep -q 'connect-timeout'; then
+  pass "ContextForge health poll has --connect-timeout"
+else
+  fail "ContextForge health poll has --connect-timeout" "missing --connect-timeout; one stalled connect can exhaust 180s budget"
+fi
+
+# =============================================
+# REVIEW ROUND 14: env var validation BEFORE use
+# =============================================
+echo "--- R14: env var validation ordering ---"
+
+# DB_PASSWORD is used for URL-encoding (python3 line) BEFORE the `: "${DB_PASSWORD:?...}"` check
+# The validation should come BEFORE the DATABASE_URL construction
+ENTRYPOINT="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh"
+ENCODE_LINE=$(grep -n 'encoded_pw\|urllib.*DB_PASSWORD' "$ENTRYPOINT" | head -1 | cut -d: -f1)
+VALIDATE_LINE=$(grep -n 'DB_PASSWORD:?' "$ENTRYPOINT" | head -1 | cut -d: -f1)
+if [ -n "$ENCODE_LINE" ] && [ -n "$VALIDATE_LINE" ]; then
+  if [ "$VALIDATE_LINE" -lt "$ENCODE_LINE" ]; then
+    pass "DB_PASSWORD validated before use in URL encoding"
+  else
+    fail "DB_PASSWORD validated before use in URL encoding" "validation at line $VALIDATE_LINE, used at line $ENCODE_LINE"
+  fi
+else
+  fail "DB_PASSWORD validation check" "could not find encode or validate lines"
+fi
+
+# =============================================
+# REVIEW ROUND 14: Error messages include variable values
+# =============================================
+echo "--- R14: Error messages include context ---"
+
+# MCPGATEWAY_PORT error should include the actual value
+PORT_ERR=$(grep 'MCPGATEWAY_PORT must be numeric' "$ENTRYPOINT")
+if echo "$PORT_ERR" | grep -q 'MCPGATEWAY_PORT'; then
+  # Check if it includes "got:" or the variable value
+  if echo "$PORT_ERR" | grep -qE 'got|MCPGATEWAY_PORT\}'; then
+    pass "PORT error includes value"
+  else
+    fail "PORT error includes value" "error says 'must be numeric' but doesn't show the bad value"
+  fi
+else
+  fail "PORT error exists" "no port validation error found"
+fi
+
+# EXTERNAL_URL error should include the actual value
+URL_ERR=$(grep 'EXTERNAL_URL contains invalid' "$ENTRYPOINT")
+if echo "$URL_ERR" | grep -qE 'got|EXTERNAL_URL'; then
+  if echo "$URL_ERR" | grep -qE 'got:?\s*\$'; then
+    pass "URL error includes value"
+  else
+    fail "URL error includes value" "error doesn't show the offending value"
+  fi
+else
+  fail "URL error exists" "no URL validation error found"
+fi
+
+# =============================================
+# REVIEW ROUND 14: Shopify token failure includes response body
+# =============================================
+echo "--- R14: Token failure includes body ---"
+
+TOKEN_FATAL=$(sed -n '/attempt.*eq 5/,/exit 1/p' "$ENTRYPOINT")
+if echo "$TOKEN_FATAL" | grep -q 'body\|response'; then
+  pass "Token failure logs response body"
+else
+  fail "Token failure logs response body" "only logs HTTP status, not the error body from Shopify"
+fi
+
+# =============================================
+# REVIEW ROUND 14: Monitor exit tagged as FATAL
+# =============================================
+echo "--- R14: Monitor exit tagged FATAL ---"
+
+# When a process dies in the monitor loop, the message should be FATAL/ERROR level
+MONITOR_MSG=$(grep 'Process.*exited.*code' "$ENTRYPOINT")
+if echo "$MONITOR_MSG" | grep -qiE 'FATAL|ERROR'; then
+  pass "Monitor exit message tagged as FATAL/ERROR"
+else
+  fail "Monitor exit message tagged as FATAL/ERROR" "message looks informational but container is about to die"
+fi
+
+# =============================================
+# REVIEW ROUND 12: Unquoted variables in bootstrap.sh
+# =============================================
+echo "--- R12: Variable quoting in bootstrap ---"
+
+# $attempt and $max_attempts should be quoted in [ ] test
+UNQUOTED_TEST=$(grep 'while \[' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | head -1)
+if echo "$UNQUOTED_TEST" | grep -qE '\$attempt\b' && ! echo "$UNQUOTED_TEST" | grep -q '"\$attempt"'; then
+  fail "bootstrap while-test quotes variables" "\$attempt unquoted in [ ] test — word splitting risk"
+else
+  pass "bootstrap while-test quotes variables"
+fi
+
+# sleep $attempt should be quoted
+UNQUOTED_SLEEP=$(grep 'sleep \$attempt' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | head -1)
+if [ -n "$UNQUOTED_SLEEP" ] && ! echo "$UNQUOTED_SLEEP" | grep -q 'sleep "\$'; then
+  fail "bootstrap sleep quotes variable" "sleep \$attempt unquoted"
+else
+  pass "bootstrap sleep quotes variable"
+fi
+
+# =============================================
+# REVIEW ROUND 18: Dockerfile COPY --chmod
+# =============================================
+echo "--- R18: Dockerfile COPY --chmod optimization ---"
+
+DOCKERFILE="/Users/junlin/Projects/Shopify/fluid-intelligence/deploy/Dockerfile"
+if grep -q 'COPY --chmod' "$DOCKERFILE"; then
+  pass "Dockerfile uses COPY --chmod (eliminates RUN chmod layer)"
+else
+  fail "Dockerfile uses COPY --chmod (eliminates RUN chmod layer)" "separate RUN chmod/chown wastes a layer"
+fi
+
+# =============================================
+# REVIEW ROUND 18: Dockerfile layer ordering
+# =============================================
+echo "--- R18: Dockerfile layer ordering ---"
+
+# Scripts (change often) should be copied AFTER schema (change rarely)
+SCHEMA_LINE=$(grep -n 'shopify-schema' "$DOCKERFILE" | head -1 | cut -d: -f1)
+SCRIPT_LINE=$(grep -n 'entrypoint.sh' "$DOCKERFILE" | head -1 | cut -d: -f1)
+if [ -n "$SCHEMA_LINE" ] && [ -n "$SCRIPT_LINE" ]; then
+  if [ "$SCHEMA_LINE" -lt "$SCRIPT_LINE" ]; then
+    pass "Schema copied before scripts (correct layer order)"
+  else
+    fail "Schema copied before scripts" "scripts at line $SCRIPT_LINE, schema at line $SCHEMA_LINE"
+  fi
+else
+  fail "Layer ordering check" "could not find COPY lines"
+fi
+
+# =============================================
+# REVIEW ROUND 16: MCP negative tests in E2E
+# =============================================
+echo "--- R16: MCP negative tests ---"
+
+E2E="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh"
+# Should have a test for invalid JSON-RPC method
+HAS_INVALID_METHOD=$(grep -cE 'nonexistent|invalid.*method|Method Not Found|-32601' "$E2E" 2>/dev/null) || HAS_INVALID_METHOD=0
+if [ "$HAS_INVALID_METHOD" -gt 0 ]; then
+  pass "E2E tests invalid JSON-RPC method"
+else
+  fail "E2E tests invalid JSON-RPC method" "no negative test for unknown MCP method"
+fi
+
+# Should have a test for malformed JSON
+HAS_MALFORMED_JSON=$(grep -cE 'broken.*json|Parse Error|-32700|malformed' "$E2E" 2>/dev/null) || HAS_MALFORMED_JSON=0
+if [ "$HAS_MALFORMED_JSON" -gt 0 ]; then
+  pass "E2E tests malformed JSON"
+else
+  fail "E2E tests malformed JSON" "no negative test for invalid JSON body"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

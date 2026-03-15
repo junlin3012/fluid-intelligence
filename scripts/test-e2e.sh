@@ -401,9 +401,46 @@ else
 fi
 
 # =============================================
-# 8. MCP RESOURCES & PROMPTS
+# 8. MCP NEGATIVE TESTS
 # =============================================
-echo "--- 8. MCP Resources & Prompts ---"
+echo "--- 8. MCP Negative Tests ---"
+
+# 8a. Invalid JSON-RPC method should return -32601 (Method Not Found)
+INVALID_METHOD=$(mcp_post "$MCP_PATH" '{"jsonrpc":"2.0","id":30,"method":"nonexistent/method","params":{}}')
+INVALID_ERR_CODE=$(echo "$INVALID_METHOD" | jq -r '.error.code // empty' 2>/dev/null)
+if [ "$INVALID_ERR_CODE" = "-32601" ]; then
+  result "PASS" "Invalid method returns -32601 (Method Not Found)"
+elif echo "$INVALID_METHOD" | jq -e '.error' > /dev/null 2>&1; then
+  result "PASS" "Invalid method returns error (code=$INVALID_ERR_CODE)"
+else
+  result "FAIL" "Invalid method rejection" "Expected error, got: $(echo "$INVALID_METHOD" | head -c 200)"
+fi
+
+# 8b. Malformed JSON should return -32700 (Parse Error)
+MALFORMED_RESP=$(curl -s --max-time 15 -X POST \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -d '{broken json!!!' \
+  "$BASE$MCP_PATH" 2>/dev/null)
+MALFORMED_ERR_CODE=$(echo "$MALFORMED_RESP" | jq -r '.error.code // empty' 2>/dev/null)
+MALFORMED_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -d '{broken json!!!' \
+  "$BASE$MCP_PATH" 2>/dev/null)
+if [ "$MALFORMED_ERR_CODE" = "-32700" ]; then
+  result "PASS" "Malformed JSON returns -32700 (Parse Error)"
+elif [ "$MALFORMED_HTTP" = "400" ] || [ -n "$MALFORMED_ERR_CODE" ]; then
+  result "PASS" "Malformed JSON rejected (HTTP $MALFORMED_HTTP, code=$MALFORMED_ERR_CODE)"
+else
+  result "FAIL" "Malformed JSON rejection" "Expected error/400, got HTTP $MALFORMED_HTTP: $(echo "$MALFORMED_RESP" | head -c 200)"
+fi
+
+# =============================================
+# 9. MCP RESOURCES & PROMPTS
+# =============================================
+echo "--- 9. MCP Resources & Prompts ---"
 
 RESOURCES=$(mcp_post "$MCP_PATH" '{"jsonrpc":"2.0","id":20,"method":"resources/list","params":{}}')
 if echo "$RESOURCES" | jq -e '.result' > /dev/null 2>&1; then

@@ -6,18 +6,19 @@ FROM asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intellige
 
 USER root
 
-# Copy ONLY our code — scripts, config, GraphQL operations
-COPY scripts/entrypoint.sh /app/entrypoint.sh
-COPY scripts/bootstrap.sh /app/bootstrap.sh
-COPY config/mcp-config.yaml /app/mcp-config.yaml
-COPY shopify-schema.graphql /app/shopify-schema.graphql
-COPY graphql/ /app/graphql/
+# Layer ordering: least-changed first → most-changed last (maximizes cache reuse)
+# 1. Schema (rarely changes — only on Shopify API version bump)
+COPY --chmod=644 --chown=root:0 shopify-schema.graphql /app/shopify-schema.graphql
 
-# Copied files owned by root (read-only to 1001), only /app/data writable by 1001
-# Targeted chown avoids walking the entire /app tree (ContextForge venv = thousands of files)
-RUN chmod +x /app/entrypoint.sh /app/bootstrap.sh && \
-    chown root:0 /app/entrypoint.sh /app/bootstrap.sh /app/mcp-config.yaml /app/shopify-schema.graphql && \
-    chown -R root:0 /app/graphql/
+# 2. Config (changes occasionally)
+COPY --chmod=644 --chown=root:0 config/mcp-config.yaml /app/mcp-config.yaml
+
+# 3. GraphQL operations (change moderately)
+COPY --chown=root:0 graphql/ /app/graphql/
+
+# 4. Scripts (change most often during development)
+COPY --chmod=755 --chown=root:0 scripts/entrypoint.sh /app/entrypoint.sh
+COPY --chmod=755 --chown=root:0 scripts/bootstrap.sh /app/bootstrap.sh
 
 USER 1001
 EXPOSE 8080
