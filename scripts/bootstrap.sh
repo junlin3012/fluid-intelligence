@@ -187,7 +187,7 @@ fi
 
 # Get all tool IDs from the catalog
 TOOL_IDS=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | \
-  jq -r '[.[].id] | @json' 2>/dev/null) || TOOL_IDS="[]"
+  jq -r 'if type == "array" then [.[].id | select(. != null)] | @json else "[]" end' 2>/dev/null) || TOOL_IDS="[]"
 if [ "$TOOL_IDS" = "[]" ]; then
   echo "[bootstrap] WARNING: No tool IDs found — virtual server will expose zero tools"
   echo "[bootstrap] MCP clients will get empty tools/list"

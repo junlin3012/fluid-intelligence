@@ -274,7 +274,7 @@ fi
 
 # tools/list
 TOOLS=$(mcp_post "/mcp" '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
-TOOL_COUNT=$(echo "$TOOLS" | jq '.result.tools | length' 2>/dev/null)
+TOOL_COUNT=$(echo "$TOOLS" | jq '.result.tools | length // 0' 2>/dev/null)
 if [ -n "$TOOL_COUNT" ] && [ "$TOOL_COUNT" -gt 0 ]; then
   result "PASS" "tools/list at /mcp: $TOOL_COUNT tools"
   echo "  Tools:"
@@ -320,7 +320,7 @@ if [ -n "$VS_ID" ]; then
   mcp_post "/servers/$VS_ID/mcp" '{"jsonrpc":"2.0","method":"notifications/initialized"}' > /dev/null 2>&1
 
   VS_TOOLS=$(mcp_post "/servers/$VS_ID/mcp" '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
-  VS_TOOL_COUNT=$(echo "$VS_TOOLS" | jq '.result.tools | length' 2>/dev/null)
+  VS_TOOL_COUNT=$(echo "$VS_TOOLS" | jq '.result.tools | length // 0' 2>/dev/null)
   if [ -n "$VS_TOOL_COUNT" ] && [ "$VS_TOOL_COUNT" -gt 0 ]; then
     result "PASS" "tools/list at VS: $VS_TOOL_COUNT tools"
   else
@@ -352,7 +352,7 @@ if [ -n "$ALL_TOOLS" ]; then
   if [ -n "$SHOPIFY_TOOL" ]; then
     echo "  Calling Shopify tool: $SHOPIFY_TOOL"
     # Get tool schema to understand required args
-    TOOL_SCHEMA=$(echo "$ALL_TOOLS" | jq ".result.tools[] | select(.name==\"$SHOPIFY_TOOL\") | .inputSchema" 2>/dev/null)
+    TOOL_SCHEMA=$(echo "$ALL_TOOLS" | jq --arg t "$SHOPIFY_TOOL" '.result.tools[] | select(.name==$t) | .inputSchema' 2>/dev/null)
     REQUIRED=$(echo "$TOOL_SCHEMA" | jq -r '.required // [] | join(", ")' 2>/dev/null)
     echo "  Required args: ${REQUIRED:-none}"
 
