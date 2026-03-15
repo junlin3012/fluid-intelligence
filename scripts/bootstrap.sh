@@ -2,23 +2,30 @@
 set -euo pipefail
 
 # Generate short-lived admin JWT for registration
-TOKEN=$(/app/.venv/bin/python -c "
-import sys
-sys.argv = ['create_jwt_token', '--username', '$PLATFORM_ADMIN_EMAIL', '--exp', '5', '--secret', '$JWT_SECRET_KEY']
+# Pass secrets via env vars to avoid shell injection (quotes in values would break inline Python)
+PRIMARY_ERR=""
+TOKEN=$(ADMIN_EMAIL="$PLATFORM_ADMIN_EMAIL" SECRET_KEY="$JWT_SECRET_KEY" /app/.venv/bin/python -c "
+import os, sys
+sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '5', '--secret', os.environ['SECRET_KEY']]
 from mcpgateway.utils.create_jwt_token import main
 main()
-" 2>/dev/null) || {
+" 2>/tmp/jwt-primary-err.log) || {
+  PRIMARY_ERR=$(cat /tmp/jwt-primary-err.log 2>/dev/null)
   # Fallback: try the module directly
   TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \
     --username "$PLATFORM_ADMIN_EMAIL" \
     --exp 5 \
-    --secret "$JWT_SECRET_KEY" 2>/dev/null)
+    --secret "$JWT_SECRET_KEY" 2>/tmp/jwt-fallback-err.log)
 }
 
 if [ -z "$TOKEN" ]; then
   echo "[bootstrap] FATAL: Could not generate JWT token"
+  [ -n "$PRIMARY_ERR" ] && echo "[bootstrap]   Primary: $PRIMARY_ERR"
+  [ -f /tmp/jwt-fallback-err.log ] && echo "[bootstrap]   Fallback: $(cat /tmp/jwt-fallback-err.log)"
+  rm -f /tmp/jwt-primary-err.log /tmp/jwt-fallback-err.log
   exit 1
 fi
+rm -f /tmp/jwt-primary-err.log /tmp/jwt-fallback-err.log
 echo "[bootstrap] JWT token generated"
 
 CF="http://localhost:${CONTEXTFORGE_PORT:-4444}"
@@ -33,7 +40,7 @@ register_gateway() {
   local existing_id
   existing_id=$(curl -sf -H "Authorization: Bearer $TOKEN" \
     "$CF/gateways" 2>/dev/null | \
-    jq -r ".[] | select(.name==\"$name\") | .id" 2>/dev/null) || true
+    jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null) || true
   if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
     echo "[bootstrap] Deleting stale $name (id=$existing_id)"
     curl -sf -X DELETE -H "Authorization: Bearer $TOKEN" \
@@ -48,7 +55,7 @@ register_gateway() {
       -d "{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}" \
       "$CF/gateways" 2>&1)
     http_code=$(echo "$response" | tail -1)
-    body=$(echo "$response" | head -n -1)
+    body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
       echo "[bootstrap] Registered $name via /gateways (tools auto-discovered)"
@@ -110,6 +117,9 @@ register_gateway "google-sheets" "http://localhost:8004/sse" "SSE"
 echo "[bootstrap] All 3 backends registered"
 TOOL_COUNT=$(curl -sf -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
 echo "[bootstrap] $TOOL_COUNT tools in catalog"
+if [ "$TOOL_COUNT" -eq 0 ]; then
+  echo "[bootstrap] WARNING: Zero tools discovered — check backend registrations above"
+fi
 
 # --- Create virtual server bundling ALL discovered tools ---
 # MCP clients connect to /servers/<UUID>/mcp (or /servers/<UUID>/sse)
@@ -129,6 +139,10 @@ fi
 # Get all tool IDs from the catalog
 TOOL_IDS=$(curl -sf -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | \
   jq -r '[.[].id] | @json' 2>/dev/null) || TOOL_IDS="[]"
+if [ "$TOOL_IDS" = "[]" ]; then
+  echo "[bootstrap] WARNING: No tool IDs found — virtual server will expose zero tools"
+  echo "[bootstrap] MCP clients will get empty tools/list"
+fi
 
 # Create virtual server with all tools
 vs_response=$(curl -s -w "\n%{http_code}" -X POST \
@@ -137,7 +151,7 @@ vs_response=$(curl -s -w "\n%{http_code}" -X POST \
   -d "{\"server\":{\"name\":\"fluid-intelligence\",\"description\":\"All Shopify + Google Sheets tools\",\"associated_tools\":$TOOL_IDS}}" \
   "$CF/servers" 2>&1)
 vs_code=$(echo "$vs_response" | tail -1)
-vs_body=$(echo "$vs_response" | head -n -1)
+vs_body=$(echo "$vs_response" | sed '$d')
 
 if [ "$vs_code" -ge 200 ] && [ "$vs_code" -lt 300 ]; then
   VS_ID=$(echo "$vs_body" | jq -r '.id // .server.id // empty' 2>/dev/null)

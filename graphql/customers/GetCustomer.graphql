@@ -4,9 +4,12 @@ query GetCustomer($id: ID!) {
     firstName
     lastName
     displayName
+    email
+    phone
     locale
     note
     tags
+    numberOfOrders
     amountSpent {
       amount
       currencyCode
@@ -23,22 +26,7 @@ query GetCustomer($id: ID!) {
       country
       zip
     }
-    orders(first: 10) {
-      edges {
-        node {
-          id
-          name
-          createdAt
-          displayFulfillmentStatus
-          displayFinancialStatus
-          totalPriceSet {
-            shopMoney {
-              amount
-              currencyCode
-            }
-          }
-        }
-      }
-    }
+    # Note: customer.orders connection removed in Shopify API 2026-01
+    # Use root orders query with filter: query: "customer_id:<id>"
   }
 }

@@ -3,7 +3,7 @@
 # Usage: ./scripts/test-e2e.sh
 # Requires: AUTH_PASSWORD env var (or reads from GCP Secret Manager)
 #           BASE_URL env var (default: Cloud Run URL)
-set -o pipefail
+set -uo pipefail
 
 # --- Config (all from env, no hardcoded secrets) ---
 BASE="${BASE_URL:-https://fluid-intelligence-1056128102929.asia-southeast1.run.app}"
@@ -19,7 +19,7 @@ if [ -z "${AUTH_PASSWORD:-}" ]; then
 fi
 
 COOKIE_JAR=$(mktemp)
-trap "rm -f $COOKIE_JAR" EXIT
+trap 'rm -f "$COOKIE_JAR"' EXIT
 
 PASSED=0
 FAILED=0
@@ -97,9 +97,9 @@ fi
 
 # 3b. PKCE code challenge
 CODE_VERIFIER=$(python3 -c "import secrets; print(secrets.token_urlsafe(43))")
-CODE_CHALLENGE=$(python3 -c "
-import hashlib, base64
-v='$CODE_VERIFIER'
+CODE_CHALLENGE=$(CODE_VERIFIER="$CODE_VERIFIER" python3 -c "
+import hashlib, base64, os
+v=os.environ['CODE_VERIFIER']
 print(base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).rstrip(b'=').decode())
 ")
 STATE=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
@@ -111,7 +111,7 @@ curl -sL --max-time 10 -c "$COOKIE_JAR" \
 
 LOGIN_HEADERS=$(curl -sv --max-time 10 \
   -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-  -X POST -d "password=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$AUTH_PASSWORD'))")" \
+  -X POST -d "password=$(AUTH_PASSWORD="$AUTH_PASSWORD" python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['AUTH_PASSWORD']))")" \
   "$BASE/.auth/login" 2>&1)
 AUTH_SESSION=$(echo "$LOGIN_HEADERS" | grep -o "location: /.idp/auth/[a-f0-9-]*" | head -1 | sed 's/location: //')
 
@@ -155,6 +155,34 @@ if [ -z "$ACCESS_TOKEN" ]; then
   echo "  Results: $PASSED/$TOTAL passed, $FAILED failed"
   echo "========================================="
   exit 1
+fi
+
+# =============================================
+# 3b. AUTH NEGATIVE TESTS
+# =============================================
+echo "--- 3b. Auth Negative Tests ---"
+
+# Verify invalid token is rejected
+INVALID_RESP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+  -H "Authorization: Bearer invalid-token-12345" \
+  -H "Accept: application/json" \
+  -X POST -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  "$BASE/mcp" 2>&1)
+if [ "$INVALID_RESP" = "401" ]; then
+  result "PASS" "Invalid token rejected (401)"
+else
+  result "FAIL" "Invalid token rejection" "Expected 401, got $INVALID_RESP"
+fi
+
+# Verify no-token request is rejected
+NO_TOKEN_RESP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+  -H "Accept: application/json" \
+  -X POST -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  "$BASE/mcp" 2>&1)
+if [ "$NO_TOKEN_RESP" = "401" ]; then
+  result "PASS" "No-token request rejected (401)"
+else
+  result "FAIL" "No-token rejection" "Expected 401, got $NO_TOKEN_RESP"
 fi
 
 # =============================================
@@ -293,8 +321,7 @@ if [ -n "$ALL_TOOLS" ]; then
       result "PASS" "dev-mcp tool call ($DEVMCP_TOOL)"
     elif echo "$CALL_RESP" | jq -e '.error' > /dev/null 2>&1; then
       ERR_MSG=$(echo "$CALL_RESP" | jq -r '.error.message // .error' 2>/dev/null)
-      # Tool errors are still "working" — the proxy forwarded the call
-      result "PASS" "dev-mcp tool reachable ($DEVMCP_TOOL, error: $ERR_MSG)"
+      result "FAIL" "dev-mcp tool call ($DEVMCP_TOOL)" "$ERR_MSG"
     else
       result "FAIL" "dev-mcp tool call" "$(echo "$CALL_RESP" | head -c 200)"
     fi
@@ -311,7 +338,7 @@ if [ -n "$ALL_TOOLS" ]; then
       result "PASS" "Sheets tool call ($SHEETS_TOOL)"
     elif echo "$CALL_RESP" | jq -e '.error' > /dev/null 2>&1; then
       ERR_MSG=$(echo "$CALL_RESP" | jq -r '.error.message // .error' 2>/dev/null)
-      result "PASS" "Sheets tool reachable ($SHEETS_TOOL, error: $ERR_MSG)"
+      result "FAIL" "Sheets tool call ($SHEETS_TOOL)" "$ERR_MSG"
     else
       result "FAIL" "Sheets tool call" "$(echo "$CALL_RESP" | head -c 200)"
     fi
@@ -329,12 +356,20 @@ fi
 echo "--- 8. MCP Resources & Prompts ---"
 
 RESOURCES=$(mcp_post "$MCP_PATH" '{"jsonrpc":"2.0","id":20,"method":"resources/list","params":{}}')
-RES_COUNT=$(echo "$RESOURCES" | jq '.result.resources | length' 2>/dev/null)
-result "PASS" "resources/list: ${RES_COUNT:-0} resources"
+if echo "$RESOURCES" | jq -e '.result' > /dev/null 2>&1; then
+  RES_COUNT=$(echo "$RESOURCES" | jq '.result.resources | length' 2>/dev/null)
+  result "PASS" "resources/list: ${RES_COUNT:-0} resources"
+else
+  result "FAIL" "resources/list" "No .result in response: $(echo "$RESOURCES" | head -c 200)"
+fi
 
 PROMPTS=$(mcp_post "$MCP_PATH" '{"jsonrpc":"2.0","id":21,"method":"prompts/list","params":{}}')
-PROMPT_COUNT=$(echo "$PROMPTS" | jq '.result.prompts | length' 2>/dev/null)
-result "PASS" "prompts/list: ${PROMPT_COUNT:-0} prompts"
+if echo "$PROMPTS" | jq -e '.result' > /dev/null 2>&1; then
+  PROMPT_COUNT=$(echo "$PROMPTS" | jq '.result.prompts | length' 2>/dev/null)
+  result "PASS" "prompts/list: ${PROMPT_COUNT:-0} prompts"
+else
+  result "FAIL" "prompts/list" "No .result in response: $(echo "$PROMPTS" | head -c 200)"
+fi
 
 # =============================================
 # SUMMARY
@@ -345,8 +380,9 @@ if [ "$FAILED" -eq 0 ]; then
   echo "  ✅ ALL TESTS PASSED: $PASSED/$TOTAL"
 else
   echo "  ❌ $FAILED FAILURES out of $TOTAL tests"
-  echo "  Failures:$FAILURES"
+  printf "  Failures:%b\n" "$FAILURES"
 fi
 echo "========================================="
 
-exit $FAILED
+# Cap exit code at 1 to avoid special shell meanings (126=not executable, 128+N=signal)
+exit $(( FAILED > 0 ? 1 : 0 ))

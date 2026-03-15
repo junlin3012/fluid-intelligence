@@ -20,15 +20,21 @@ query GetProducts($first: Int = 10, $query: String) {
             }
           }
         }
-        variants(first: 3) {
+        variants(first: 10) {
           edges {
             node {
               id
               title
               sku
-              price
+              priceV2 {
+                amount
+                currencyCode
+              }
               inventoryQuantity
             }
+          }
+          pageInfo {
+            hasNextPage
           }
         }
       }

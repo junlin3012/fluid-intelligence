@@ -21,7 +21,7 @@
 - **Build configs**: `deploy/cloudbuild.yaml` (app), `deploy/cloudbuild-base.yaml` (base)
 - **Dockerfile path**: `docker build -f deploy/Dockerfile .` (context = repo root)
 - **Health checks**: auth-proxy returns 401 on `/health` (this is correct — auth is working)
-- **Min instances**: 1 (avoid cold starts), max: 1 (in-memory auth state)
+- **Min instances**: 0 (scale to zero, ~$15-25/mo), max: 1 (in-memory auth state)
 - **`--no-cpu-throttling`**: REQUIRED for child processes
 
 ## Authentication
@@ -49,10 +49,13 @@
 
 ## Backend Registration
 
-- **Endpoint**: `POST /servers` on ContextForge (NOT `/gateways`, NOT `/backends`)
+- **Backend discovery**: `POST /gateways` on ContextForge — triggers tool auto-discovery
+- **Virtual servers**: `POST /servers` — creates MCP endpoints that bundle subsets of discovered tools
 - **Auth**: Bearer JWT in Authorization header
-- **Request body**: `{"server": {"name": "...", "url": "...", "transport": "sse"}}`
+- **Gateway body**: `{"name": "...", "url": "...", "transport": "SSE"}`
+- **Server body**: `{"server": {"name": "...", "description": "...", "associated_tools": [...]}}`
 - **Transports**: `sse` for all backends (Apollo, dev-mcp, sheets). ContextForge's MCP client has a bug with `streamablehttp` transport — use `sse` until fixed.
+- **Re-registration**: bootstrap.sh deletes stale gateways before re-registering to pick up URL/transport changes
 - **Idempotent**: 409 = already exists, treated as success
 
 ## Secrets & Keys
@@ -62,10 +65,10 @@
 
 ## Cost Consciousness (CRITICAL)
 
-Cloud cost and efficiency MUST be part of every design decision. The target monthly GCP bill is $65-85/mo.
+Cloud cost and efficiency MUST be part of every design decision. The target monthly GCP bill is $15-25/mo (with min-instances=0).
 
 - **Cloud Build**: Each `gcloud builds submit` costs ~$0.50-1.00 and takes 3-5 minutes. NEVER submit speculative "let's see if this works" builds. Fix ALL issues in one commit.
-- **Cloud Run**: min-instances=1 with no-cpu-throttling = ~$55-70/mo. This is the majority of the bill. Do NOT increase max-instances unless auth state is externalized.
+- **Cloud Run**: min-instances=0 with no-cpu-throttling = ~$5-15/mo. Cold start ~15-20s. Do NOT increase max-instances unless auth state is externalized.
 - **Cloud Build machines**: Use `e2-highcpu-8` (NOT `e2-highcpu-32`). The larger machine has quota restrictions in asia-southeast1 and costs 4x more.
 - **Schema size**: The 98K-line Shopify schema consumes significant memory. Consider trimming unused types if memory becomes an issue.
 - **Base image rebuilds**: Only rebuild the base image when upstream dependencies (Apollo, ContextForge, auth-proxy) change. App changes go through the thin Dockerfile.

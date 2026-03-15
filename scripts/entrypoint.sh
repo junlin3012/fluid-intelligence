@@ -27,14 +27,24 @@ export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
 export MCG_PORT="$CONTEXTFORGE_PORT"
 export MCG_HOST="0.0.0.0"
 
+# --- Validate required env vars ---
+: "${SHOPIFY_API_VERSION:?SHOPIFY_API_VERSION must be set (e.g., 2026-01)}"
+: "${DB_PASSWORD:?DB_PASSWORD must be set}"
+: "${SHOPIFY_CLIENT_ID:?SHOPIFY_CLIENT_ID must be set}"
+: "${SHOPIFY_CLIENT_SECRET:?SHOPIFY_CLIENT_SECRET must be set}"
+: "${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}"
+: "${AUTH_PASSWORD:?AUTH_PASSWORD must be set}"
+
 # --- Fetch Shopify access token via client credentials ---
 TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
 echo "[fluid-intelligence] Fetching Shopify access token..."
 for attempt in 1 2 3 4 5; do
-  response=$(curl -sf --max-time 15 -X POST "$TOKEN_ENDPOINT" \
+  # Pass credentials via stdin to avoid exposing SHOPIFY_CLIENT_SECRET in /proc/cmdline
+  response=$(printf 'grant_type=client_credentials&client_id=%s&client_secret=%s' \
+    "$SHOPIFY_CLIENT_ID" "$SHOPIFY_CLIENT_SECRET" | \
+    curl -sf --max-time 15 -X POST "$TOKEN_ENDPOINT" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "grant_type=client_credentials&client_id=${SHOPIFY_CLIENT_ID}&client_secret=${SHOPIFY_CLIENT_SECRET}" \
-    2>/dev/null) || true
+    -d @- 2>/dev/null) || true
   if [ -n "$response" ]; then
     token=$(echo "$response" | jq -r '.access_token // empty')
     if [ -n "$token" ]; then
@@ -77,21 +87,21 @@ python3 -m mcpgateway.translate \
   --expose-sse \
   --port 8000 &
 APOLLO_PID=$!
-PIDS+=($APOLLO_PID)
-start_and_verify "Apollo bridge" $APOLLO_PID
+PIDS+=("$APOLLO_PID")
+start_and_verify "Apollo bridge" "$APOLLO_PID"
 
 # 2. IBM ContextForge (Python, gateway core)
 # The `mcpgateway` entry point and `python -m mcpgateway` both fail at runtime.
 # Direct invocation of main() works since the module IS importable.
-/app/.venv/bin/python -c "
-import sys
-sys.argv = ['mcpgateway', '--port', '$CONTEXTFORGE_PORT', '--host', '0.0.0.0']
+MCG_PORT="$CONTEXTFORGE_PORT" /app/.venv/bin/python -c "
+import os, sys
+sys.argv = ['mcpgateway', '--port', os.environ['MCG_PORT'], '--host', '0.0.0.0']
 from mcpgateway.cli import main
 main()
 " &
 CONTEXTFORGE_PID=$!
-PIDS+=($CONTEXTFORGE_PID)
-start_and_verify "ContextForge" $CONTEXTFORGE_PID
+PIDS+=("$CONTEXTFORGE_PID")
+start_and_verify "ContextForge" "$CONTEXTFORGE_PID"
 
 # 3. dev-mcp bridge (stdio→SSE)
 python3 -m mcpgateway.translate \
@@ -99,7 +109,7 @@ python3 -m mcpgateway.translate \
   --expose-sse \
   --port 8003 &
 TRANSLATE_DEVMCP_PID=$!
-PIDS+=($TRANSLATE_DEVMCP_PID)
+PIDS+=("$TRANSLATE_DEVMCP_PID")
 
 # 4. google-sheets bridge (stdio→SSE)
 python3 -m mcpgateway.translate \
@@ -107,7 +117,7 @@ python3 -m mcpgateway.translate \
   --expose-sse \
   --port 8004 &
 TRANSLATE_SHEETS_PID=$!
-PIDS+=($TRANSLATE_SHEETS_PID)
+PIDS+=("$TRANSLATE_SHEETS_PID")
 
 # --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
@@ -131,6 +141,10 @@ for i in $(seq 1 180); do
 done
 
 # 5. mcp-auth-proxy (Go, OAuth 2.1 front door) — starts after ContextForge is ready
+# SECURITY NOTE: --password and --google-client-secret are passed via CLI args,
+# which exposes them in /proc/cmdline. This is a known limitation of mcp-auth-proxy v2.5.4.
+# TODO: Check if future versions support env var or config file for secrets.
+# Risk is bounded: all processes run as UID 1001 in the same container.
 mcp-auth-proxy \
   --listen :8080 \
   --external-url "https://${EXTERNAL_URL:-junlinleather.com}" \
@@ -142,8 +156,8 @@ mcp-auth-proxy \
   --data-path /app/data \
   -- http://localhost:${CONTEXTFORGE_PORT} &
 AUTHPROXY_PID=$!
-PIDS+=($AUTHPROXY_PID)
-start_and_verify "auth-proxy" $AUTHPROXY_PID
+PIDS+=("$AUTHPROXY_PID")
+start_and_verify "auth-proxy" "$AUTHPROXY_PID"
 
 # 6. Bootstrap: register backends (foreground — fail fast if broken)
 echo "[fluid-intelligence] Running bootstrap..."
@@ -161,7 +175,7 @@ echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :8004"
 echo "  auth-proxy:     PID=$AUTHPROXY_PID  :8080"
 
 # --- Monitor: exit if any process dies ---
-wait -n $APOLLO_PID $CONTEXTFORGE_PID $TRANSLATE_DEVMCP_PID $TRANSLATE_SHEETS_PID $AUTHPROXY_PID
+wait -n "$APOLLO_PID" "$CONTEXTFORGE_PID" "$TRANSLATE_DEVMCP_PID" "$TRANSLATE_SHEETS_PID" "$AUTHPROXY_PID"
 EXIT_CODE=$?
 
 for name_pid in "Apollo-bridge:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$TRANSLATE_DEVMCP_PID" "sheets:$TRANSLATE_SHEETS_PID" "auth-proxy:$AUTHPROXY_PID"; do

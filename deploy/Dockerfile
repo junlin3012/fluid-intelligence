@@ -1,9 +1,6 @@
-# Fluid Intelligence — Thin app layer (use after base image rebuild)
-# Build time: ~5 seconds (just COPY scripts onto pre-built base)
-# Base image contains: ContextForge, Apollo, auth-proxy, tini, all system deps
-#
-# To activate: copy this to Dockerfile after base image has been rebuilt
-# cp deploy/Dockerfile.thin deploy/Dockerfile
+# Fluid Intelligence — Thin app layer
+# Build time: ~5 seconds (just COPY scripts/config onto pre-built base)
+# Base image (Dockerfile.base): ContextForge, Apollo, auth-proxy, tini, all system deps
 
 FROM asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intelligence-base:latest
 

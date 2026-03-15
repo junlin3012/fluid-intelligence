@@ -56,3 +56,6 @@ RUN /app/.venv/bin/python -c "import psycopg2; print('✓ psycopg2 OK')"
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R 1001:0 /app
+
+# Default to non-root user (thin Dockerfile also sets this)
+USER 1001

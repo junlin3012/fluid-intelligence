@@ -101,13 +101,14 @@ Total cold start: ~15-20s (with `--cpu-boost`)
 - ContextForge must use `MCG_PORT` (not `PORT`) for its internal port
 - mcp-auth-proxy binds to :8080 (matching Cloud Run's PORT)
 
-### 4. Bootstrap server registration format
-- ContextForge API uses `POST /servers` endpoint (NOT `/gateways`)
-- `/servers` auto-discovers tools; `/gateways` only stores metadata
-- Transport values: lowercase `sse` (NOT uppercase, NOT `streamablehttp`)
-- ContextForge's MCP client has a bug with `streamablehttp` transport — the initialize handshake fails with "connection closed: initialize notification". Use `sse` for all backends.
+### 4. Bootstrap registration: gateways vs servers
+- `POST /gateways` registers backends and triggers tool auto-discovery into the catalog
+- `POST /servers` creates virtual servers that bundle subsets of discovered tools
+- MCP clients connect to `/servers/<UUID>/mcp` — without a virtual server, `tools/list` returns empty
+- Transport values: `SSE` for all backends (ContextForge's MCP client has a bug with `streamablehttp`)
 - JWT token generated via `mcpgateway.utils.create_jwt_token` in ContextForge venv
-- Registration body: `{"server":{"name":"...","url":"...","transport":"sse"}}`
+- Gateway body: `{"name":"...","url":"...","transport":"SSE"}`
+- Server body: `{"server":{"name":"...","description":"...","associated_tools":[...]}}`
 
 ### 5. Binary permissions in multi-stage Docker builds
 - `COPY --from=stage` preserves permissions from source stage

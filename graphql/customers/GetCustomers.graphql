@@ -6,6 +6,8 @@ query GetCustomers($first: Int = 10, $query: String) {
         firstName
         lastName
         displayName
+        email
+        phone
         amountSpent {
           amount
           currencyCode
