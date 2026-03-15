@@ -69,13 +69,13 @@ register_server() {
 # Wait for Apollo before registering it (TCP connection check)
 echo "[bootstrap] Waiting for Apollo..."
 for i in $(seq 1 30); do
-  curl -s --connect-timeout 2 --max-time 3 http://localhost:8000/ -o /dev/null 2>&1 && break
+  curl -s --connect-timeout 2 --max-time 3 http://localhost:8000/sse -o /dev/null 2>&1 && break
   [ "$i" -eq 30 ] && { echo "[bootstrap] FATAL: Apollo not ready after 30s"; exit 1; }
   sleep 1
 done
 
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
-register_server "apollo-shopify" "http://localhost:8000/mcp" "streamablehttp"
+register_server "apollo-shopify" "http://localhost:8000/sse" "sse"
 
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
 echo "[bootstrap] Waiting for dev-mcp bridge..."

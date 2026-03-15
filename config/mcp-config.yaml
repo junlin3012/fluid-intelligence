@@ -4,7 +4,7 @@
 endpoint: https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/graphql.json
 
 transport:
-  type: streamable_http
+  type: sse
   port: 8000
 
 schema:

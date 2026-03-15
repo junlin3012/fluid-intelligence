@@ -49,9 +49,10 @@
 
 ## Backend Registration
 
-- **Endpoint**: `POST /gateways` on ContextForge (NOT `/servers`, NOT `/backends`)
+- **Endpoint**: `POST /servers` on ContextForge (NOT `/gateways`, NOT `/backends`)
 - **Auth**: Bearer JWT in Authorization header
-- **Transports**: `STREAMABLEHTTP` (Apollo), `SSE` (bridges)
+- **Request body**: `{"server": {"name": "...", "url": "...", "transport": "sse"}}`
+- **Transports**: `sse` for all backends (Apollo, dev-mcp, sheets). ContextForge's MCP client has a bug with `streamablehttp` transport — use `sse` until fixed.
 - **Idempotent**: 409 = already exists, treated as success
 
 ## Secrets & Keys
