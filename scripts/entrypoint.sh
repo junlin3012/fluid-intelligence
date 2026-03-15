@@ -36,6 +36,8 @@ trap cleanup SIGTERM SIGINT
 : "${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}"
 : "${AUTH_PASSWORD:?AUTH_PASSWORD must be set}"
 : "${SHOPIFY_STORE:?SHOPIFY_STORE must be set}"
+: "${GOOGLE_OAUTH_CLIENT_ID:?GOOGLE_OAUTH_CLIENT_ID must be set}"
+: "${GOOGLE_OAUTH_CLIENT_SECRET:?GOOGLE_OAUTH_CLIENT_SECRET must be set}"
 
 # --- Validate env var formats (defense-in-depth against injection) ---
 if ! [[ "$SHOPIFY_STORE" =~ ^[a-zA-Z0-9._-]+\.myshopify\.com$ ]]; then
