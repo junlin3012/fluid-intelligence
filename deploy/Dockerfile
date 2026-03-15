@@ -13,7 +13,11 @@ COPY config/mcp-config.yaml /app/mcp-config.yaml
 COPY shopify-schema.graphql /app/shopify-schema.graphql
 COPY graphql/ /app/graphql/
 
-RUN chmod +x /app/entrypoint.sh /app/bootstrap.sh && chown -R 1001:0 /app
+# Scripts/config owned by root (read-only to 1001), only /app/data writable
+RUN chmod +x /app/entrypoint.sh /app/bootstrap.sh && \
+    chown -R root:0 /app && \
+    chmod -R a+r /app && \
+    chown -R 1001:0 /app/data
 
 USER 1001
 EXPOSE 8080

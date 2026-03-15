@@ -10,23 +10,23 @@ import os, sys
 sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '10', '--secret', os.environ['SECRET_KEY']]
 from mcpgateway.utils.create_jwt_token import main
 main()
-" 2>/tmp/jwt-primary-err.log) || {
-  PRIMARY_ERR=$(cat /tmp/jwt-primary-err.log 2>/dev/null)
+" 2>/tmp/jwt-primary-err-$$.log) || {
+  PRIMARY_ERR=$(cat /tmp/jwt-primary-err-$$.log 2>/dev/null)
   # Fallback: try the module directly
   TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \
     --username "$PLATFORM_ADMIN_EMAIL" \
     --exp 10 \
-    --secret "$JWT_SECRET_KEY" 2>/tmp/jwt-fallback-err.log)
+    --secret "$JWT_SECRET_KEY" 2>/tmp/jwt-fallback-err-$$.log)
 }
 
 if [ -z "$TOKEN" ]; then
   echo "[bootstrap] FATAL: Could not generate JWT token"
   [ -n "$PRIMARY_ERR" ] && echo "[bootstrap]   Primary: $PRIMARY_ERR"
-  [ -f /tmp/jwt-fallback-err.log ] && echo "[bootstrap]   Fallback: $(cat /tmp/jwt-fallback-err.log)"
-  rm -f /tmp/jwt-primary-err.log /tmp/jwt-fallback-err.log
+  [ -f /tmp/jwt-fallback-err-$$.log ] && echo "[bootstrap]   Fallback: $(cat /tmp/jwt-fallback-err-$$.log)"
+  rm -f /tmp/jwt-primary-err-$$.log /tmp/jwt-fallback-err-$$.log
   exit 1
 fi
-rm -f /tmp/jwt-primary-err.log /tmp/jwt-fallback-err.log
+rm -f /tmp/jwt-primary-err-$$.log /tmp/jwt-fallback-err-$$.log
 echo "[bootstrap] JWT token generated"
 
 CF="http://localhost:${CONTEXTFORGE_PORT:-4444}"
@@ -48,13 +48,15 @@ register_gateway() {
       "$CF/gateways/$existing_id" > /dev/null 2>&1 || true
   fi
 
-  local max_attempts=3 attempt=1
+  local max_attempts=3 attempt=1 http_code=0
   while [ $attempt -le $max_attempts ]; do
+    payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
+      '{name: $n, url: $u, transport: $t}')
     response=$(curl -s -w "\n%{http_code}" -X POST \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}" \
-      "$CF/gateways" 2>&1)
+      -d "$payload" \
+      "$CF/gateways" 2>/dev/null)
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | sed '$d')
 
@@ -146,11 +148,13 @@ if [ "$TOOL_IDS" = "[]" ]; then
 fi
 
 # Create virtual server with all tools
+vs_payload=$(jq -n --argjson tools "$TOOL_IDS" \
+  '{server: {name: "fluid-intelligence", description: "All Shopify + Google Sheets tools", associated_tools: $tools}}')
 vs_response=$(curl -s -w "\n%{http_code}" -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"server\":{\"name\":\"fluid-intelligence\",\"description\":\"All Shopify + Google Sheets tools\",\"associated_tools\":$TOOL_IDS}}" \
-  "$CF/servers" 2>&1)
+  -d "$vs_payload" \
+  "$CF/servers" 2>/dev/null)
 vs_code=$(echo "$vs_response" | tail -1)
 vs_body=$(echo "$vs_response" | sed '$d')
 

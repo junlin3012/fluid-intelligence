@@ -34,6 +34,21 @@ export MCG_HOST="0.0.0.0"
 : "${SHOPIFY_CLIENT_SECRET:?SHOPIFY_CLIENT_SECRET must be set}"
 : "${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}"
 : "${AUTH_PASSWORD:?AUTH_PASSWORD must be set}"
+: "${SHOPIFY_STORE:?SHOPIFY_STORE must be set}"
+
+# --- Validate env var formats (defense-in-depth against injection) ---
+if ! [[ "$SHOPIFY_STORE" =~ ^[a-zA-Z0-9._-]+\.myshopify\.com$ ]]; then
+  echo "[fluid-intelligence] FATAL: SHOPIFY_STORE must be a valid myshopify.com domain, got: $SHOPIFY_STORE"
+  exit 1
+fi
+if ! [[ "${MCPGATEWAY_PORT:-4444}" =~ ^[0-9]+$ ]]; then
+  echo "[fluid-intelligence] FATAL: MCPGATEWAY_PORT must be numeric"
+  exit 1
+fi
+if [[ -n "${EXTERNAL_URL:-}" ]] && ! [[ "$EXTERNAL_URL" =~ ^[a-zA-Z0-9._-]+(\.[a-zA-Z0-9._-]+)+$ ]]; then
+  echo "[fluid-intelligence] FATAL: EXTERNAL_URL contains invalid characters"
+  exit 1
+fi
 
 # --- Fetch Shopify access token via client credentials ---
 TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
@@ -46,7 +61,7 @@ for attempt in 1 2 3 4 5; do
     "$SHOPIFY_CLIENT_ID" "$SHOPIFY_CLIENT_SECRET" | \
     curl -s -w "\n%{http_code}" --max-time 15 -X POST "$TOKEN_ENDPOINT" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d @- 2>/tmp/shopify-curl-err.log) || true
+    -d @- 2>/tmp/shopify-curl-err-$$.log) || true
   if [ -n "$response" ]; then
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | sed '$d')
@@ -54,15 +69,15 @@ for attempt in 1 2 3 4 5; do
     if [ -n "$token" ]; then
       export SHOPIFY_ACCESS_TOKEN="$token"
       echo "[fluid-intelligence] Shopify token acquired (attempt $attempt)"
-      rm -f /tmp/shopify-curl-err.log
+      rm -f /tmp/shopify-curl-err-$$.log
       break
     fi
   fi
   if [ "$attempt" -eq 5 ]; then
     echo "[fluid-intelligence] FATAL: Could not fetch Shopify access token after 5 attempts"
     echo "[fluid-intelligence]   Last HTTP status: $http_code"
-    [ -f /tmp/shopify-curl-err.log ] && echo "[fluid-intelligence]   curl stderr: $(cat /tmp/shopify-curl-err.log)"
-    rm -f /tmp/shopify-curl-err.log
+    [ -f /tmp/shopify-curl-err-$$.log ] && echo "[fluid-intelligence]   curl stderr: $(cat /tmp/shopify-curl-err-$$.log)"
+    rm -f /tmp/shopify-curl-err-$$.log
     exit 1
   fi
   echo "[fluid-intelligence] Token attempt $attempt failed (HTTP $http_code)"
@@ -170,9 +185,12 @@ AUTHPROXY_PID=$!
 PIDS+=("$AUTHPROXY_PID")
 start_and_verify "auth-proxy" "$AUTHPROXY_PID"
 
-# 6. Bootstrap: register backends (foreground — fail fast if broken)
+# 6. Bootstrap: register backends (background so SIGTERM can kill it cleanly)
 echo "[fluid-intelligence] Running bootstrap..."
-/app/bootstrap.sh || {
+/app/bootstrap.sh &
+BOOTSTRAP_PID=$!
+PIDS+=("$BOOTSTRAP_PID")
+wait "$BOOTSTRAP_PID" || {
   echo "[fluid-intelligence] FATAL: bootstrap failed — backend registration incomplete"
   for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   exit 1

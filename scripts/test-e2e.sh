@@ -113,7 +113,7 @@ LOGIN_HEADERS=$(curl -sv --max-time 10 \
   -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
   -X POST -d "password=$(AUTH_PASSWORD="$AUTH_PASSWORD" python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['AUTH_PASSWORD']))")" \
   "$BASE/.auth/login" 2>&1)
-AUTH_SESSION=$(echo "$LOGIN_HEADERS" | grep -o "location: /.idp/auth/[a-f0-9-]*" | head -1 | sed 's/location: //')
+AUTH_SESSION=$(echo "$LOGIN_HEADERS" | grep -oi "location: /.idp/auth/[a-f0-9-]*" | head -1 | sed 's/[Ll]ocation: //')
 
 AUTH_CODE=""
 if [ -n "$AUTH_SESSION" ]; then
@@ -121,12 +121,22 @@ if [ -n "$AUTH_SESSION" ]; then
     -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
     "$BASE$AUTH_SESSION" 2>&1)
   AUTH_CODE=$(echo "$CODE_REDIRECT" | grep -o "code=[^&]*" | head -1 | sed 's/code=//')
+  RETURNED_STATE=$(echo "$CODE_REDIRECT" | grep -o "state=[^&\"]*" | head -1 | sed 's/state=//')
 fi
 
 if [ -n "$AUTH_CODE" ]; then
   result "PASS" "Authorization code obtained"
 else
   result "FAIL" "Auth code" "No code in redirect (session=$AUTH_SESSION)"
+fi
+
+# Validate state parameter (CSRF protection)
+if [ -n "$RETURNED_STATE" ] && [ "$RETURNED_STATE" = "$STATE" ]; then
+  result "PASS" "State CSRF validation"
+elif [ -n "$RETURNED_STATE" ]; then
+  result "FAIL" "State CSRF validation" "Expected $STATE, got $RETURNED_STATE"
+else
+  result "FAIL" "State CSRF validation" "No state parameter in redirect"
 fi
 
 # 3d. Exchange auth code for access token
@@ -138,11 +148,21 @@ if [ -n "$AUTH_CODE" ]; then
     "$BASE/.idp/token" 2>&1)
   ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty' 2>/dev/null)
   EXPIRES_IN=$(echo "$TOKEN_RESP" | jq -r '.expires_in // "?"' 2>/dev/null)
+  TOKEN_TYPE=$(echo "$TOKEN_RESP" | jq -r '.token_type // empty' 2>/dev/null)
 
   if [ -n "$ACCESS_TOKEN" ]; then
     result "PASS" "Token exchange (expires_in=${EXPIRES_IN}s)"
   else
     result "FAIL" "Token exchange" "$TOKEN_RESP"
+  fi
+
+  # OAuth 2.1 requires token_type=Bearer
+  if [ -n "$TOKEN_TYPE" ]; then
+    if [[ "${TOKEN_TYPE,,}" == "bearer" ]]; then
+      result "PASS" "Token type is Bearer"
+    else
+      result "FAIL" "Token type" "Expected Bearer, got $TOKEN_TYPE"
+    fi
   fi
 else
   result "FAIL" "Token exchange" "Skipped (no auth code)"
