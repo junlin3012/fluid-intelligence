@@ -42,6 +42,14 @@ echo "[bootstrap] JWT token generated"
 
 CF="http://127.0.0.1:${CONTEXTFORGE_PORT:-4444}"
 
+# Fast-fail: verify ContextForge is still alive before expensive registration attempts
+check_contextforge() {
+  if ! curl -sf --connect-timeout 2 --max-time 3 "$CF/health" > /dev/null 2>&1; then
+    echo "[bootstrap] FATAL: ContextForge health check failed — process may have crashed"
+    exit 1
+  fi
+}
+
 # Register a backend MCP server with ContextForge via /gateways endpoint
 # /gateways triggers tool auto-discovery; /servers is for virtual server composition only
 # Always re-registers to pick up URL/transport changes across deployments
@@ -70,11 +78,12 @@ register_gateway() {
   while [ "$attempt" -le "$max_attempts" ]; do
     payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
       '{name: $n, url: $u, transport: $t}')
+    local curl_err="/tmp/bootstrap-curl-err-$$.log"
     response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "$payload" \
-      "$CF/gateways" 2>/dev/null)
+      "$CF/gateways" 2>"$curl_err")
     http_code=$(parse_http_code "$response")
     body=$(echo "$response" | sed '$d')
 
@@ -90,11 +99,14 @@ register_gateway() {
     fi
 
     echo "[bootstrap] $name registration failed (HTTP $http_code): $(echo "$body" | head -c 200)"
+    [ -s "$curl_err" ] && echo "[bootstrap]   curl error: $(cat "$curl_err")"
     attempt=$((attempt + 1))
     sleep "$attempt"
   done
 
   echo "[bootstrap] FATAL: Failed to register $name after $max_attempts attempts (last HTTP $http_code): $(echo "$body" | head -c 200)"
+  [ -s "$curl_err" ] && echo "[bootstrap]   curl error: $(cat "$curl_err")"
+  rm -f "$curl_err"
   return 1
 }
 
@@ -118,6 +130,7 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+check_contextforge
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
 register_gateway "apollo-shopify" "http://127.0.0.1:8000/sse" "SSE"
 
@@ -136,6 +149,7 @@ for i in $(seq 1 90); do
   sleep 1
 done
 
+check_contextforge
 echo "[bootstrap] Registering dev-mcp (Shopify docs)..."
 register_gateway "shopify-dev-mcp" "http://127.0.0.1:8003/sse" "SSE"
 
@@ -154,6 +168,7 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+check_contextforge
 echo "[bootstrap] Registering google-sheets..."
 register_gateway "google-sheets" "http://127.0.0.1:8004/sse" "SSE"
 

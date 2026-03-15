@@ -1049,6 +1049,38 @@ else
 fi
 
 # =============================================
+# MIRROR-SHINE D2: Failure cascade analysis
+# =============================================
+echo "--- D2: Failure cascade ---"
+
+# Bootstrap should check ContextForge health before each registration (fast-fail on CF death)
+CF_HEALTH_CHECKS=$(grep -c 'check_contextforge' scripts/bootstrap.sh) || CF_HEALTH_CHECKS=0
+if [ "$CF_HEALTH_CHECKS" -ge 3 ]; then
+  pass "bootstrap.sh checks ContextForge health before each registration ($CF_HEALTH_CHECKS checks)"
+else
+  fail "bootstrap.sh checks ContextForge health before each registration" "only $CF_HEALTH_CHECKS checks (need >= 3)"
+fi
+
+# check_contextforge function exists
+if grep -q 'check_contextforge()' scripts/bootstrap.sh; then
+  pass "bootstrap.sh has check_contextforge fast-fail function"
+else
+  fail "bootstrap.sh has check_contextforge fast-fail function" "function not found"
+fi
+
+# =============================================
+# MIRROR-SHINE D6: Observability gaps
+# =============================================
+echo "--- D6: Observability ---"
+
+# register_gateway should log curl errors on failure (not 2>/dev/null)
+if grep -A30 'register_gateway()' scripts/bootstrap.sh | grep -q 'curl_err'; then
+  pass "register_gateway captures curl stderr for diagnostics"
+else
+  fail "register_gateway captures curl stderr" "curl errors silently discarded"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""
