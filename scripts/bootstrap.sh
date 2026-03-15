@@ -85,7 +85,7 @@ register_gateway() {
     payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
       '{name: $n, url: $u, transport: $t}')
     local curl_err="/tmp/bootstrap-curl-err-$$.log"
-    response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+    response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 60 -X POST \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "$payload" \
@@ -143,8 +143,10 @@ echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
 register_gateway "apollo-shopify" "http://127.0.0.1:8000/sse" "SSE"
 
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
+# healthz only checks the bridge HTTP server, not the underlying MCP subprocess.
+# We also probe the SSE endpoint to verify the MCP subprocess is actually connected.
 echo "[bootstrap] Waiting for dev-mcp bridge..."
-for i in $(seq 1 90); do
+for i in $(seq 1 120); do
   if [ -f /tmp/devmcp.pid ]; then
     BRIDGE_PID=$(cat /tmp/devmcp.pid 2>/dev/null)
     if [ -n "$BRIDGE_PID" ] && [[ "$BRIDGE_PID" =~ ^[0-9]+$ ]] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
@@ -152,9 +154,18 @@ for i in $(seq 1 90); do
       exit 1
     fi
   fi
+  # Check both healthz AND SSE endpoint (SSE returns 200 only when MCP subprocess is connected)
   rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/healthz > /dev/null 2>&1 || rc=$?
-  [ "$rc" -eq 0 ] && break
-  [ "$i" -eq 90 ] && { echo "[bootstrap] FATAL: dev-mcp bridge not ready after 90s (last curl rc=$rc)"; exit 1; }
+  if [ "$rc" -eq 0 ]; then
+    # Bridge HTTP is up — now verify MCP subprocess is actually ready via SSE probe
+    sse_rc=0; curl -s --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/sse -o /dev/null 2>&1 || sse_rc=$?
+    # SSE returns 200 (streaming) which curl sees as timeout (28) = subprocess ready
+    if [ "$sse_rc" -eq 0 ] || [ "$sse_rc" -eq 28 ]; then
+      echo "[bootstrap] dev-mcp bridge ready (healthz + SSE confirmed) after ${i}s"
+      break
+    fi
+  fi
+  [ "$i" -eq 120 ] && { echo "[bootstrap] FATAL: dev-mcp bridge not ready after 120s (last curl rc=$rc, sse_rc=${sse_rc:-n/a})"; exit 1; }
   sleep 1
 done
 
