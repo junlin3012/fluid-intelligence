@@ -40,14 +40,14 @@ register_gateway() {
   # Delete any existing registrations (stale URL/transport from previous deploy)
   # Use head -1 to handle multiple entries with the same name (delete each individually)
   local existing_ids
-  existing_ids=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" \
+  existing_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" \
     "$CF/gateways" 2>/dev/null | \
     jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null) || true
   if [ -n "$existing_ids" ]; then
     echo "$existing_ids" | while read -r eid; do
       [ -z "$eid" ] || [ "$eid" = "null" ] && continue
       echo "[bootstrap] Deleting stale $name (id=$eid)"
-      del_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X DELETE \
+      del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
         -H "Authorization: Bearer $TOKEN" "$CF/gateways/$eid" 2>/dev/null) || del_code=0
       if [ "$del_code" -ne 200 ] && [ "$del_code" -ne 204 ] && [ "$del_code" -ne 404 ]; then
         echo "[bootstrap] WARNING: DELETE gateway $eid returned HTTP $del_code"
@@ -59,7 +59,7 @@ register_gateway() {
   while [ "$attempt" -le "$max_attempts" ]; do
     payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
       '{name: $n, url: $u, transport: $t}')
-    response=$(curl -s -w "\n%{http_code}" --max-time 10 -X POST \
+    response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
       -d "$payload" \
@@ -151,7 +151,7 @@ echo "[bootstrap] All 3 backends registered, waiting for tool discovery..."
 prev_count=-1
 stable=0
 for i in $(seq 1 30); do
-  TOOL_COUNT=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
+  TOOL_COUNT=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
   [[ "$TOOL_COUNT" =~ ^[0-9]+$ ]] || TOOL_COUNT=0
   if [ "$TOOL_COUNT" -eq "$prev_count" ] && [ "$TOOL_COUNT" -gt 0 ]; then
     stable=$((stable + 1))
@@ -173,12 +173,12 @@ fi
 echo "[bootstrap] Creating virtual server..."
 
 # Delete existing virtual server (stale from previous deploy)
-existing_vs=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" \
+existing_vs=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" \
   "$CF/servers" 2>/dev/null | \
   jq -r '.[] | select(.name=="fluid-intelligence") | .id' 2>/dev/null) || true
 if [ -n "$existing_vs" ] && [ "$existing_vs" != "null" ]; then
   echo "[bootstrap] Deleting stale virtual server (id=$existing_vs)"
-  vs_del_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X DELETE \
+  vs_del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
     -H "Authorization: Bearer $TOKEN" "$CF/servers/$existing_vs" 2>/dev/null) || vs_del_code=0
   if [ "$vs_del_code" -ne 200 ] && [ "$vs_del_code" -ne 204 ] && [ "$vs_del_code" -ne 404 ]; then
     echo "[bootstrap] WARNING: DELETE virtual server returned HTTP $vs_del_code"
@@ -186,7 +186,7 @@ if [ -n "$existing_vs" ] && [ "$existing_vs" != "null" ]; then
 fi
 
 # Get all tool IDs from the catalog
-TOOL_IDS=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | \
+TOOL_IDS=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | \
   jq -r '[.[].id] | @json' 2>/dev/null) || TOOL_IDS="[]"
 if [ "$TOOL_IDS" = "[]" ]; then
   echo "[bootstrap] WARNING: No tool IDs found — virtual server will expose zero tools"
@@ -196,7 +196,7 @@ fi
 # Create virtual server with all tools
 vs_payload=$(jq -n --argjson tools "$TOOL_IDS" \
   '{server: {name: "fluid-intelligence", description: "All Shopify + Google Sheets tools", associated_tools: $tools}}')
-vs_response=$(curl -s -w "\n%{http_code}" --max-time 10 -X POST \
+vs_response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "$vs_payload" \
@@ -217,8 +217,8 @@ fi
 
 # --- Debug dump ---
 echo "[bootstrap] --- Debug: /gateways ---"
-curl -sf --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/gateways" 2>/dev/null | jq '[.[] | {name, id, url}]' 2>/dev/null || echo "  /gateways failed"
+curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/gateways" 2>/dev/null | jq '[.[] | {name, id, url}]' 2>/dev/null || echo "  /gateways failed"
 echo "[bootstrap] --- Debug: /servers ---"
-curl -sf --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/servers" 2>/dev/null | jq '[.[] | {name, id}]' 2>/dev/null || echo "  /servers failed"
+curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/servers" 2>/dev/null | jq '[.[] | {name, id}]' 2>/dev/null || echo "  /servers failed"
 echo "[bootstrap] --- Debug: tool names ---"
-curl -sf --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq '[.[].name]' 2>/dev/null | head -30 || echo "  /tools failed"
+curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq '[.[].name]' 2>/dev/null | head -30 || echo "  /tools failed"

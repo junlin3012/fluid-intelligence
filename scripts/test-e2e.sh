@@ -53,7 +53,7 @@ echo ""
 # 1. REACHABILITY
 # =============================================
 echo "--- 1. Reachability ---"
-http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$BASE/" 2>&1)
+http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$BASE/" 2>/dev/null)
 if [ "$http_code" = "401" ]; then
   result "PASS" "Root returns 401 (auth-proxy alive)"
 else
@@ -65,14 +65,14 @@ fi
 # =============================================
 echo "--- 2. OAuth Discovery ---"
 
-oauth_as=$(curl -sf --max-time 10 "$BASE/.well-known/oauth-authorization-server" 2>&1)
+oauth_as=$(curl -sf --connect-timeout 5 --max-time 10 "$BASE/.well-known/oauth-authorization-server" 2>/dev/null)
 if echo "$oauth_as" | jq -e '.token_endpoint' > /dev/null 2>&1; then
   result "PASS" "OAuth authorization server metadata"
 else
   result "FAIL" "OAuth AS metadata" "Missing token_endpoint"
 fi
 
-oauth_pr=$(curl -sf --max-time 10 "$BASE/.well-known/oauth-protected-resource" 2>&1)
+oauth_pr=$(curl -sf --connect-timeout 5 --max-time 10 "$BASE/.well-known/oauth-protected-resource" 2>/dev/null)
 if echo "$oauth_pr" | jq -e '.resource' > /dev/null 2>&1; then
   result "PASS" "OAuth protected resource metadata"
 else
@@ -89,7 +89,7 @@ REDIRECT_URI="http://localhost:29999/callback"
 CLIENT_REG=$(curl -sf --max-time 10 -X POST \
   -H "Content-Type: application/json" \
   -d "{\"redirect_uris\":[\"$REDIRECT_URI\"],\"client_name\":\"e2e-test-$(date +%s)\"}" \
-  "$BASE/.idp/register" 2>&1)
+  "$BASE/.idp/register" 2>/dev/null)
 CLIENT_ID=$(echo "$CLIENT_REG" | jq -r '.client_id // empty' 2>/dev/null)
 CLIENT_SECRET=$(echo "$CLIENT_REG" | jq -r '.client_secret // empty' 2>/dev/null)
 
@@ -109,9 +109,9 @@ print(base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).rstrip(b'=')
 STATE=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 
 # 3c. Start auth flow → login page → submit password → get auth code
-curl -sL --max-time 10 -c "$COOKIE_JAR" \
+curl -sL --connect-timeout 5 --max-time 10 -c "$COOKIE_JAR" \
   "$BASE/.idp/auth?response_type=code&client_id=$CLIENT_ID&redirect_uri=$REDIRECT_URI&state=$STATE&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256" \
-  -o /dev/null 2>&1
+  -o /dev/null 2>/dev/null
 
 # Use -D to capture headers (not -v which leaks password in POST body to stderr)
 LOGIN_HEADERS=$(curl -s -D - -o /dev/null --max-time 10 \
@@ -291,7 +291,7 @@ echo "--- 5. Virtual Servers ---"
 # Try /servers REST endpoint (may be blocked by auth mismatch)
 SERVERS_RESP=$(curl -s --max-time 10 -w "\nHTTPCODE:%{http_code}" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
-  "$BASE/servers" 2>&1)
+  "$BASE/servers" 2>/dev/null)
 SERVERS_CODE=$(echo "$SERVERS_RESP" | grep -o 'HTTPCODE:[0-9]*' | cut -d: -f2)
 SERVERS_BODY=$(echo "$SERVERS_RESP" | sed '/HTTPCODE:/d')
 

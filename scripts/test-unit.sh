@@ -921,6 +921,28 @@ else
 fi
 
 # =============================================
+# REVIEW ROUND 49: curl pattern hardening
+# =============================================
+echo "--- R49: curl patterns ---"
+
+# test-e2e.sh should not use 2>&1 on curl calls that capture JSON
+E2E_CURL_2REDIR=$(grep -c 'curl.*2>&1' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh) || E2E_CURL_2REDIR=0
+if [ "$E2E_CURL_2REDIR" -eq 0 ]; then
+  pass "test-e2e.sh no curl 2>&1 contamination"
+else
+  fail "test-e2e.sh no curl 2>&1 contamination" "found $E2E_CURL_2REDIR instances"
+fi
+
+# bootstrap.sh all curl calls have --connect-timeout
+BOOT_CURL_TOTAL=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -c 'curl ') || BOOT_CURL_TOTAL=0
+BOOT_CURL_TIMEOUT=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -c 'connect-timeout') || BOOT_CURL_TIMEOUT=0
+if [ "$BOOT_CURL_TOTAL" -eq "$BOOT_CURL_TIMEOUT" ]; then
+  pass "bootstrap.sh all $BOOT_CURL_TOTAL curl calls have --connect-timeout"
+else
+  fail "bootstrap.sh all curl calls have --connect-timeout" "$BOOT_CURL_TIMEOUT/$BOOT_CURL_TOTAL have it"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""
