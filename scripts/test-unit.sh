@@ -1149,6 +1149,32 @@ else
 fi
 
 # =============================================
+# BATCH 7: Mirror polish
+# =============================================
+echo "--- B7: Mirror polish ---"
+
+# R1: tini uses -g flag for process group signal forwarding
+if grep -q 'tini.*-g' deploy/Dockerfile; then
+  pass "Dockerfile: tini uses -g flag (signals reach grandchild processes)"
+else
+  fail "Dockerfile: tini uses -g flag" "grandchild processes orphaned on SIGTERM"
+fi
+
+# R5: PID files cleaned at startup (idempotency)
+if head -40 scripts/entrypoint.sh | grep -q 'rm.*apollo.pid'; then
+  pass "entrypoint.sh cleans stale PID files at startup"
+else
+  fail "entrypoint.sh cleans stale PID files at startup" "stale PID files from previous run cause false crash detection"
+fi
+
+# R5: PID files cleaned in cleanup trap
+if grep -A15 'cleanup()' scripts/entrypoint.sh | grep -q 'apollo.pid'; then
+  pass "cleanup trap removes PID files on shutdown"
+else
+  fail "cleanup trap removes PID files on shutdown" "PID files persist after shutdown"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

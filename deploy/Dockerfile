@@ -28,5 +28,7 @@ RUN chmod 755 /app/entrypoint.sh /app/bootstrap.sh && \
 USER 1001
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/tini", "--"]
+# -g: forward signals to the entire process group (reaches grandchild processes
+# like npx, uv, apollo spawned by the translate bridges)
+ENTRYPOINT ["/usr/local/bin/tini", "-g", "--"]
 CMD ["/app/entrypoint.sh"]

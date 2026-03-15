@@ -24,11 +24,15 @@ cleanup() {
   for pid in "${PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true
   done
-  # Clean up temp files that may be orphaned if SIGTERM arrives during token fetch
+  # Clean up temp and PID files
   rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log /tmp/jwt-primary-err-$$.log /tmp/jwt-fallback-err-$$.log
+  rm -f /tmp/apollo.pid /tmp/devmcp.pid /tmp/sheets.pid
   exit 143  # 128 + 15 (SIGTERM)
 }
 trap cleanup SIGTERM SIGINT
+
+# Clean stale PID files from previous runs (safe on Cloud Run tmpfs, defensive for Docker Compose)
+rm -f /tmp/apollo.pid /tmp/devmcp.pid /tmp/sheets.pid
 
 # --- Validate required env vars (BEFORE any use, especially DB_PASSWORD in URL encoding) ---
 : "${SHOPIFY_API_VERSION:?SHOPIFY_API_VERSION must be set (e.g., 2026-01)}"
