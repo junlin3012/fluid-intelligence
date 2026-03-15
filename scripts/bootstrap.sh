@@ -67,12 +67,12 @@ register_server() {
 }
 
 # Wait for Apollo bridge before registering it
-# SSE endpoint is streaming (never completes), so just check TCP connectivity
+# SSE endpoint is streaming (never completes), so check TCP + HTTP response
 echo "[bootstrap] Waiting for Apollo bridge..."
 for i in $(seq 1 60); do
-  curl -s --connect-timeout 2 --max-time 1 http://localhost:8000/sse -o /dev/null 2>&1
-  # curl exit code 28 = timeout (connected but streaming) = success for SSE
-  [ $? -eq 0 ] || [ $? -eq 28 ] && break
+  # curl exit 28 = timeout (connected but SSE stream) = success
+  rc=0; curl -s --connect-timeout 2 --max-time 1 http://localhost:8000/sse -o /dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq 28 ] && break
   [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo bridge not ready after 60s"; exit 1; }
   sleep 1
 done
