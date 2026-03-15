@@ -110,7 +110,8 @@ echo "--- EXTERNAL_URL validation ---"
 
 validate_external_url() {
   local val="$1"
-  [[ "$val" =~ ^[a-zA-Z0-9._-]+(\.[a-zA-Z0-9._-]+)+$ ]]
+  # Must match entrypoint.sh production regex exactly: each label starts with alphanumeric, no dots in labels
+  [[ "$val" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*(\.[a-zA-Z0-9][a-zA-Z0-9_-]*)+$ ]]
 }
 
 validate_external_url "junlinleather.com" && pass "Valid URL: junlinleather.com" || fail "Valid URL: junlinleather.com" "rejected"
@@ -362,18 +363,12 @@ assert_no_match "Naive URL has raw @ in password section" "user:p@ss" "$SAFE_URL
 # =============================================
 echo "--- R4: EXTERNAL_URL double-dot rejection ---"
 
-# Current regex: ^[a-zA-Z0-9._-]+(\.[a-zA-Z0-9._-]+)+$
-# This allows "foo..bar.com" — should reject consecutive dots
-validate_external_url_strict() {
-  local val="$1"
-  # Each label must start with alphanumeric, no consecutive dots
-  [[ "$val" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*(\.[a-zA-Z0-9][a-zA-Z0-9_-]*)+$ ]]
-}
-
-# The strict version should reject double dots
-validate_external_url_strict "foo..bar.com" && fail "Double dots: foo..bar.com" "accepted" || pass "Double dots: foo..bar.com rejected"
-validate_external_url_strict "...com" && fail "Triple dots: ...com" "accepted" || pass "Triple dots rejected"
-validate_external_url_strict "junlinleather.com" && pass "Valid: junlinleather.com (strict)" || fail "Valid: junlinleather.com (strict)" "rejected"
+# validate_external_url now matches production regex (alphanumeric label start, no dots in labels)
+# So it inherently rejects double dots — test using the same function
+validate_external_url "foo..bar.com" && fail "Double dots: foo..bar.com" "accepted" || pass "Double dots: foo..bar.com rejected"
+validate_external_url "...com" && fail "Triple dots: ...com" "accepted" || pass "Triple dots rejected"
+validate_external_url ".leading-dot.com" && fail "Leading dot" "accepted" || pass "Leading dot rejected"
+validate_external_url "-leading-hyphen.com" && fail "Leading hyphen" "accepted" || pass "Leading hyphen rejected"
 
 # Now test that the CURRENT code in entrypoint.sh uses the strict regex
 CURRENT_REGEX=$(grep 'EXTERNAL_URL.*=~' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | head -1)
@@ -509,12 +504,12 @@ fi
 # =============================================
 echo "--- R11: curl --connect-timeout on health poll ---"
 
-# The ContextForge health poll should have --connect-timeout to avoid one hung connect exhausting the 180s budget
+# The ContextForge health poll should have --connect-timeout to avoid one hung connect exhausting the 120s budget
 CF_HEALTH_CURL=$(grep 'CONTEXTFORGE_PORT.*health' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | head -1)
 if echo "$CF_HEALTH_CURL" | grep -q 'connect-timeout'; then
   pass "ContextForge health poll has --connect-timeout"
 else
-  fail "ContextForge health poll has --connect-timeout" "missing --connect-timeout; one stalled connect can exhaust 180s budget"
+  fail "ContextForge health poll has --connect-timeout" "missing --connect-timeout; one stalled connect can exhaust 120s budget"
 fi
 
 # =============================================
@@ -1173,6 +1168,49 @@ if grep -A15 'cleanup()' scripts/entrypoint.sh | grep -q 'apollo.pid'; then
 else
   fail "cleanup trap removes PID files on shutdown" "PID files persist after shutdown"
 fi
+
+# =============================================
+# B7-R6: DB_USER/DB_NAME functional validation
+# =============================================
+echo "--- B7-R6: DB_USER/DB_NAME validation ---"
+
+validate_db_identifier() {
+  local val="$1"
+  [[ "$val" =~ ^[a-zA-Z0-9_]+$ ]]
+}
+
+validate_db_identifier "contextforge" && pass "DB identifier: alphanumeric" || fail "DB identifier: alphanumeric" "rejected"
+validate_db_identifier "my_db_01" && pass "DB identifier: underscores + digits" || fail "DB identifier: underscores + digits" "rejected"
+validate_db_identifier "user@host" && fail "DB identifier: @ char" "accepted" || pass "DB identifier rejects @"
+validate_db_identifier "db?name" && fail "DB identifier: ? char" "accepted" || pass "DB identifier rejects ?"
+validate_db_identifier "db/name" && fail "DB identifier: / char" "accepted" || pass "DB identifier rejects /"
+validate_db_identifier "" && fail "DB identifier: empty" "accepted" || pass "DB identifier rejects empty"
+validate_db_identifier "name with spaces" && fail "DB identifier: spaces" "accepted" || pass "DB identifier rejects spaces"
+
+# =============================================
+# B7-R6: JWT format boundary tests
+# =============================================
+echo "--- B7-R6: JWT format boundary tests ---"
+
+validate_jwt_format() {
+  local val="$1"
+  [[ "$val" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]
+}
+
+# Valid JWTs
+validate_jwt_format "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk" \
+  && pass "JWT format: valid 3-part token" || fail "JWT format: valid 3-part token" "rejected"
+validate_jwt_format "a.b.c" && pass "JWT format: minimal 3-part" || fail "JWT format: minimal 3-part" "rejected"
+validate_jwt_format "a-b_c.d-e_f.g-h_i" && pass "JWT format: hyphens and underscores" || fail "JWT format: hyphens and underscores" "rejected"
+
+# Invalid JWTs
+validate_jwt_format "only-two.parts" && fail "JWT format: 2 parts" "accepted" || pass "JWT format rejects 2-part token"
+validate_jwt_format "four.parts.are.bad" && fail "JWT format: 4 parts" "accepted" || pass "JWT format rejects 4-part token"
+validate_jwt_format "has spaces.in.token" && fail "JWT format: spaces" "accepted" || pass "JWT format rejects spaces"
+validate_jwt_format "has+plus.in.token" && fail "JWT format: plus sign" "accepted" || pass "JWT format rejects + sign"
+validate_jwt_format "" && fail "JWT format: empty" "accepted" || pass "JWT format rejects empty"
+validate_jwt_format "WARNING: something
+eyJ.eyJ.sig" && fail "JWT format: multiline (Python warning)" "accepted" || pass "JWT format rejects multiline"
 
 # =============================================
 # SUMMARY
