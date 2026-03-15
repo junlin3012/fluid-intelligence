@@ -47,8 +47,11 @@ register_gateway() {
     echo "$existing_ids" | while read -r eid; do
       [ -z "$eid" ] || [ "$eid" = "null" ] && continue
       echo "[bootstrap] Deleting stale $name (id=$eid)"
-      curl -sf --max-time 10 -X DELETE -H "Authorization: Bearer $TOKEN" \
-        "$CF/gateways/$eid" > /dev/null 2>&1 || true
+      del_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X DELETE \
+        -H "Authorization: Bearer $TOKEN" "$CF/gateways/$eid" 2>/dev/null) || del_code=0
+      if [ "$del_code" -ne 200 ] && [ "$del_code" -ne 204 ] && [ "$del_code" -ne 404 ]; then
+        echo "[bootstrap] WARNING: DELETE gateway $eid returned HTTP $del_code"
+      fi
     done
   fi
 
@@ -175,8 +178,11 @@ existing_vs=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" \
   jq -r '.[] | select(.name=="fluid-intelligence") | .id' 2>/dev/null) || true
 if [ -n "$existing_vs" ] && [ "$existing_vs" != "null" ]; then
   echo "[bootstrap] Deleting stale virtual server (id=$existing_vs)"
-  curl -sf --max-time 10 -X DELETE -H "Authorization: Bearer $TOKEN" \
-    "$CF/servers/$existing_vs" > /dev/null 2>&1 || true
+  vs_del_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X DELETE \
+    -H "Authorization: Bearer $TOKEN" "$CF/servers/$existing_vs" 2>/dev/null) || vs_del_code=0
+  if [ "$vs_del_code" -ne 200 ] && [ "$vs_del_code" -ne 204 ] && [ "$vs_del_code" -ne 404 ]; then
+    echo "[bootstrap] WARNING: DELETE virtual server returned HTTP $vs_del_code"
+  fi
 fi
 
 # Get all tool IDs from the catalog

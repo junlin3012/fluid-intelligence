@@ -10,12 +10,16 @@ BASE="${BASE_URL:-https://fluid-intelligence-1056128102929.asia-southeast1.run.a
 
 if [ -z "${AUTH_PASSWORD:-}" ]; then
   echo "[setup] AUTH_PASSWORD not set, fetching from Secret Manager..."
+  gcloud_err=$(mktemp)
   AUTH_PASSWORD=$(gcloud secrets versions access latest \
     --secret=mcp-auth-passphrase \
-    --project=junlinleather-mcp 2>/dev/null) || {
+    --project=junlinleather-mcp 2>"$gcloud_err") || {
     echo "FATAL: Set AUTH_PASSWORD or configure gcloud for secret access"
+    [ -s "$gcloud_err" ] && echo "  gcloud error: $(cat "$gcloud_err")"
+    rm -f "$gcloud_err"
     exit 1
   }
+  rm -f "$gcloud_err"
 fi
 
 COOKIE_JAR=$(mktemp)

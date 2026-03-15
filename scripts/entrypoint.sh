@@ -80,7 +80,7 @@ for attempt in 1 2 3 4 5; do
   if [ -n "$response" ]; then
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | sed '$d')
-    token=$(echo "$body" | jq -r '.access_token // empty' 2>/dev/null)
+    token=$(echo "$body" | jq -r '.access_token // empty' 2>/tmp/jq-err-$$.log) || true
     if [ -n "$token" ]; then
       export SHOPIFY_ACCESS_TOKEN="$token"
       echo "[fluid-intelligence] Shopify token acquired (attempt $attempt)"
@@ -93,7 +93,8 @@ for attempt in 1 2 3 4 5; do
     echo "[fluid-intelligence]   Last HTTP status: $http_code"
     echo "[fluid-intelligence]   Response body: $(echo "$body" | head -c 500)"
     [ -f /tmp/shopify-curl-err-$$.log ] && echo "[fluid-intelligence]   curl stderr: $(cat /tmp/shopify-curl-err-$$.log)"
-    rm -f /tmp/shopify-curl-err-$$.log
+    [ -f /tmp/jq-err-$$.log ] && [ -s /tmp/jq-err-$$.log ] && echo "[fluid-intelligence]   jq parse error: $(cat /tmp/jq-err-$$.log)"
+    rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log
     exit 1
   fi
   echo "[fluid-intelligence] Token attempt $attempt failed (HTTP $http_code)"
@@ -124,7 +125,7 @@ start_and_verify() {
 # Apollo only supports stdio or streamable_http transports.
 # ContextForge's MCP client has a bug with streamable_http, so we use stdio
 # and bridge it to SSE via mcpgateway.translate (same pattern as dev-mcp/sheets).
-python3 -m mcpgateway.translate \
+/app/.venv/bin/python -m mcpgateway.translate \
   --stdio "apollo /app/mcp-config.yaml" \
   --expose-sse \
   --port 8000 &
@@ -147,7 +148,7 @@ PIDS+=("$CONTEXTFORGE_PID")
 start_and_verify "ContextForge" "$CONTEXTFORGE_PID"
 
 # 3. dev-mcp bridge (stdio→SSE)
-python3 -m mcpgateway.translate \
+/app/.venv/bin/python -m mcpgateway.translate \
   --stdio "npx -y @shopify/dev-mcp@latest" \
   --expose-sse \
   --port 8003 &
@@ -157,7 +158,7 @@ echo "$TRANSLATE_DEVMCP_PID" > /tmp/devmcp.pid
 start_and_verify "dev-mcp bridge" "$TRANSLATE_DEVMCP_PID"
 
 # 4. google-sheets bridge (stdio→SSE)
-python3 -m mcpgateway.translate \
+/app/.venv/bin/python -m mcpgateway.translate \
   --stdio "uv tool run mcp-google-sheets@latest --transport stdio" \
   --expose-sse \
   --port 8004 &

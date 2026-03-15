@@ -885,6 +885,42 @@ else
 fi
 
 # =============================================
+# REVIEW ROUND 48: Error handling improvements
+# =============================================
+echo "--- R48: Error handling ---"
+
+# Bridge processes use venv python
+BRIDGE_PYTHON_COUNT=$(grep -c '/app/.venv/bin/python -m mcpgateway.translate' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh) || BRIDGE_PYTHON_COUNT=0
+if [ "$BRIDGE_PYTHON_COUNT" -eq 3 ]; then
+  pass "All 3 bridges use venv python"
+else
+  fail "All 3 bridges use venv python" "found $BRIDGE_PYTHON_COUNT (expected 3)"
+fi
+
+# No bare python3 for mcpgateway.translate
+BARE_PYTHON_COUNT=$(grep -cE '^python3 -m mcpgateway' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh) || BARE_PYTHON_COUNT=0
+if [ "$BARE_PYTHON_COUNT" -eq 0 ]; then
+  pass "No bare python3 for mcpgateway.translate"
+else
+  fail "No bare python3 for mcpgateway.translate" "found $BARE_PYTHON_COUNT bare python3 calls"
+fi
+
+# DELETE operations log HTTP status
+if grep -q 'DELETE.*gateway' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh && \
+   grep -q 'WARNING.*DELETE.*gateway' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh; then
+  pass "bootstrap.sh logs DELETE gateway failures"
+else
+  fail "bootstrap.sh logs DELETE gateway failures" "DELETE failures silently swallowed"
+fi
+
+# gcloud stderr not discarded in test-e2e.sh
+if grep -A2 'gcloud secrets' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh | grep -q 'gcloud_err\|gcloud error'; then
+  pass "test-e2e.sh surfaces gcloud errors"
+else
+  fail "test-e2e.sh surfaces gcloud errors" "gcloud stderr still discarded"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""
