@@ -1,5 +1,5 @@
-query GetCustomers($first: Int = 10, $query: String) {
-  customers(first: $first, query: $query) {
+query GetCustomers($first: Int = 10, $after: String, $query: String) {
+  customers(first: $first, after: $after, query: $query) {
     edges {
       node {
         id

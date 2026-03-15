@@ -1,5 +1,5 @@
-query GetProducts($first: Int = 10, $query: String) {
-  products(first: $first, query: $query) {
+query GetProducts($first: Int = 10, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query) {
     edges {
       node {
         id

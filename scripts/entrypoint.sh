@@ -90,6 +90,7 @@ export MCG_HOST="0.0.0.0"
 # --- Fetch Shopify access token via client credentials ---
 TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
 echo "[fluid-intelligence] Fetching Shopify access token..."
+body=""
 for attempt in 1 2 3 4 5; do
   # Pass credentials via stdin to avoid exposing SHOPIFY_CLIENT_SECRET in /proc/cmdline
   # Capture HTTP status separately for diagnostics on failure

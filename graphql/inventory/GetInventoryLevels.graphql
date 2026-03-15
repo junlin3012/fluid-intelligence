@@ -1,8 +1,8 @@
-query GetInventoryLevels($locationId: ID!, $first: Int = 50) {
+query GetInventoryLevels($locationId: ID!, $first: Int = 50, $after: String) {
   location(id: $locationId) {
     id
     name
-    inventoryLevels(first: $first) {
+    inventoryLevels(first: $first, after: $after) {
       edges {
         node {
           id

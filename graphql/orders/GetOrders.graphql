@@ -1,5 +1,5 @@
-query GetOrders($first: Int = 10, $query: String) {
-  orders(first: $first, query: $query) {
+query GetOrders($first: Int = 10, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query) {
     edges {
       node {
         id

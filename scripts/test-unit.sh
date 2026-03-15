@@ -970,7 +970,7 @@ echo "--- R51: JWT secret safety ---"
 
 # Neither primary nor fallback JWT generation should pass secrets via --secret $VARIABLE on the CLI
 # Both paths should use os.environ inside inline Python
-JWT_CLI_LEAK=$(grep -cE '^\s*--secret "\$' scripts/bootstrap.sh) || JWT_CLI_LEAK=0
+JWT_CLI_LEAK=$(grep -cE '^\s*--secret "\$' $REPO_ROOT/scripts/bootstrap.sh) || JWT_CLI_LEAK=0
 if [ "$JWT_CLI_LEAK" -eq 0 ]; then
   pass "bootstrap.sh JWT generation passes secrets via env vars only"
 else
@@ -978,7 +978,7 @@ else
 fi
 
 # Both JWT paths use inline Python with os.environ
-JWT_ENVIRON_COUNT=$(grep -c "os.environ\['SECRET_KEY'\]" scripts/bootstrap.sh) || JWT_ENVIRON_COUNT=0
+JWT_ENVIRON_COUNT=$(grep -c "os.environ\['SECRET_KEY'\]" $REPO_ROOT/scripts/bootstrap.sh) || JWT_ENVIRON_COUNT=0
 if [ "$JWT_ENVIRON_COUNT" -ge 2 ]; then
   pass "Both JWT paths (primary + fallback) use os.environ for secret"
 else
@@ -991,7 +991,7 @@ fi
 echo "--- D1: Timeout arithmetic ---"
 
 # ContextForge health timeout must be <= 120s (was 180s, exceeds 240s probe budget)
-CF_TIMEOUT=$(grep 'CF_HEALTH_TIMEOUT=' scripts/entrypoint.sh | head -1 | sed 's/.*CF_HEALTH_TIMEOUT=//' | grep -o '^[0-9]*') || CF_TIMEOUT=0
+CF_TIMEOUT=$(grep 'CF_HEALTH_TIMEOUT=' $REPO_ROOT/scripts/entrypoint.sh | head -1 | sed 's/.*CF_HEALTH_TIMEOUT=//' | grep -o '^[0-9]*') || CF_TIMEOUT=0
 if [ "$CF_TIMEOUT" -le 120 ] && [ "$CF_TIMEOUT" -gt 0 ]; then
   pass "ContextForge health timeout ($CF_TIMEOUT s) fits within startup probe budget"
 else
@@ -1013,7 +1013,7 @@ else
 fi
 
 # Cleanup trap includes temp file removal
-if grep -A10 'cleanup()' scripts/entrypoint.sh | grep -q 'shopify-curl-err'; then
+if grep -A10 'cleanup()' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'shopify-curl-err'; then
   pass "cleanup trap removes orphaned temp files"
 else
   fail "cleanup trap removes orphaned temp files" "temp files not cleaned on SIGTERM"
@@ -1026,7 +1026,7 @@ echo "--- D4: Contract compliance ---"
 
 # bootstrap.sh should use parse_http_code (not raw tail -1) for HTTP status extraction
 # Exclude the tail -1 inside parse_http_code itself (that's the safe wrapper)
-BOOTSTRAP_RAW_TAIL=$(grep 'tail -1' scripts/bootstrap.sh | grep -vc 'parse_http_code\|code=') || BOOTSTRAP_RAW_TAIL=0
+BOOTSTRAP_RAW_TAIL=$(grep 'tail -1' $REPO_ROOT/scripts/bootstrap.sh | grep -vc 'parse_http_code\|code=') || BOOTSTRAP_RAW_TAIL=0
 if [ "$BOOTSTRAP_RAW_TAIL" -eq 0 ]; then
   pass "bootstrap.sh uses parse_http_code (no raw tail -1)"
 else
@@ -1034,14 +1034,14 @@ else
 fi
 
 # parse_http_code helper exists in bootstrap.sh
-if grep -q 'parse_http_code()' scripts/bootstrap.sh; then
+if grep -q 'parse_http_code()' $REPO_ROOT/scripts/bootstrap.sh; then
   pass "bootstrap.sh has parse_http_code helper"
 else
   fail "bootstrap.sh has parse_http_code helper" "function not found"
 fi
 
 # entrypoint.sh validates http_code is numeric after extraction
-if grep -A1 'tail -1' scripts/entrypoint.sh | grep -q '\[0-9\]'; then
+if grep -A1 'tail -1' $REPO_ROOT/scripts/entrypoint.sh | grep -q '\[0-9\]'; then
   pass "entrypoint.sh validates http_code is numeric"
 else
   fail "entrypoint.sh validates http_code is numeric" "no numeric check after tail -1"
@@ -1053,7 +1053,7 @@ fi
 echo "--- D2: Failure cascade ---"
 
 # Bootstrap should check ContextForge health before each registration (fast-fail on CF death)
-CF_HEALTH_CHECKS=$(grep -c 'check_contextforge' scripts/bootstrap.sh) || CF_HEALTH_CHECKS=0
+CF_HEALTH_CHECKS=$(grep -c 'check_contextforge' $REPO_ROOT/scripts/bootstrap.sh) || CF_HEALTH_CHECKS=0
 if [ "$CF_HEALTH_CHECKS" -ge 3 ]; then
   pass "bootstrap.sh checks ContextForge health before each registration ($CF_HEALTH_CHECKS checks)"
 else
@@ -1061,7 +1061,7 @@ else
 fi
 
 # check_contextforge function exists
-if grep -q 'check_contextforge()' scripts/bootstrap.sh; then
+if grep -q 'check_contextforge()' $REPO_ROOT/scripts/bootstrap.sh; then
   pass "bootstrap.sh has check_contextforge fast-fail function"
 else
   fail "bootstrap.sh has check_contextforge fast-fail function" "function not found"
@@ -1073,14 +1073,14 @@ fi
 echo "--- D3: Data flow integrity ---"
 
 # encoded_pw must be guarded against empty result
-if grep -A3 'encoded_pw=' scripts/entrypoint.sh | grep -q 'FATAL.*empty'; then
+if grep -A3 'encoded_pw=' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'FATAL.*empty'; then
   pass "entrypoint.sh guards against empty encoded_pw"
 else
   fail "entrypoint.sh guards against empty encoded_pw" "empty password produces password-less DATABASE_URL"
 fi
 
 # Shopify token request uses --data-urlencode (not raw printf)
-if grep -q 'data-urlencode.*client_id' scripts/entrypoint.sh; then
+if grep -q 'data-urlencode.*client_id' $REPO_ROOT/scripts/entrypoint.sh; then
   pass "entrypoint.sh URL-encodes Shopify credentials in token request"
 else
   fail "entrypoint.sh URL-encodes Shopify credentials" "raw printf with %s — special chars in client_id/secret break form body"
@@ -1092,29 +1092,29 @@ fi
 echo "--- D5: Validation completeness ---"
 
 # VS_ID must be validated after extraction (empty/null = fatal)
-if grep -A5 'VS_ID=' scripts/bootstrap.sh | grep -q '"null"'; then
+if grep -A5 'VS_ID=' $REPO_ROOT/scripts/bootstrap.sh | grep -q '"null"'; then
   pass "bootstrap.sh validates VS_ID is not empty/null"
 else
   fail "bootstrap.sh validates VS_ID" "no null check after VS_ID extraction"
 fi
 
 # GOOGLE_OAUTH env vars validated at startup
-if grep -q 'GOOGLE_OAUTH_CLIENT_ID:?' scripts/entrypoint.sh && \
-   grep -q 'GOOGLE_OAUTH_CLIENT_SECRET:?' scripts/entrypoint.sh; then
+if grep -q 'GOOGLE_OAUTH_CLIENT_ID:?' $REPO_ROOT/scripts/entrypoint.sh && \
+   grep -q 'GOOGLE_OAUTH_CLIENT_SECRET:?' $REPO_ROOT/scripts/entrypoint.sh; then
   pass "entrypoint.sh validates GOOGLE_OAUTH env vars"
 else
   fail "entrypoint.sh validates GOOGLE_OAUTH env vars" "missing required var check"
 fi
 
 # DB_USER and DB_NAME validated as alphanumeric before DATABASE_URL interpolation
-if grep -q 'DB_USER.*alphanumeric\|DB_USER.*\[a-zA-Z0-9_\]' scripts/entrypoint.sh; then
+if grep -q 'DB_USER.*alphanumeric\|DB_USER.*\[a-zA-Z0-9_\]' $REPO_ROOT/scripts/entrypoint.sh; then
   pass "entrypoint.sh validates DB_USER format"
 else
   fail "entrypoint.sh validates DB_USER format" "DB_USER interpolated into DATABASE_URL without validation"
 fi
 
 # PID file reads validated as numeric before kill
-PID_NUMERIC_CHECKS=$(grep -c 'BRIDGE_PID.*\[0-9\]' scripts/bootstrap.sh) || PID_NUMERIC_CHECKS=0
+PID_NUMERIC_CHECKS=$(grep -c 'BRIDGE_PID.*\[0-9\]' $REPO_ROOT/scripts/bootstrap.sh) || PID_NUMERIC_CHECKS=0
 if [ "$PID_NUMERIC_CHECKS" -ge 3 ]; then
   pass "bootstrap.sh validates PID file contents as numeric ($PID_NUMERIC_CHECKS checks)"
 else
@@ -1122,14 +1122,14 @@ else
 fi
 
 # JWT token format validated after generation
-if grep -q 'JWT.*invalid format\|TOKEN.*header\.payload\.signature' scripts/bootstrap.sh; then
+if grep -q 'JWT.*invalid format\|TOKEN.*header\.payload\.signature' $REPO_ROOT/scripts/bootstrap.sh; then
   pass "bootstrap.sh validates JWT token format"
 else
   fail "bootstrap.sh validates JWT token format" "no format check after JWT generation"
 fi
 
 # Virtual server deletion handles multiple IDs (while read loop)
-if grep -A5 'existing_vs' scripts/bootstrap.sh | grep -q 'while read'; then
+if grep -A5 'existing_vs' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'while read'; then
   pass "bootstrap.sh handles multiple stale virtual server IDs"
 else
   fail "bootstrap.sh handles multiple stale virtual server IDs" "single-value assumption"
@@ -1141,7 +1141,7 @@ fi
 echo "--- D6: Observability ---"
 
 # register_gateway should log curl errors on failure (not 2>/dev/null)
-if grep -A30 'register_gateway()' scripts/bootstrap.sh | grep -q 'curl_err'; then
+if grep -A30 'register_gateway()' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'curl_err'; then
   pass "register_gateway captures curl stderr for diagnostics"
 else
   fail "register_gateway captures curl stderr" "curl errors silently discarded"
@@ -1153,21 +1153,21 @@ fi
 echo "--- B7: Mirror polish ---"
 
 # R1: tini uses -g flag for process group signal forwarding
-if grep -q 'tini.*-g' deploy/Dockerfile; then
+if grep -q 'tini.*-g' $REPO_ROOT/deploy/Dockerfile; then
   pass "Dockerfile: tini uses -g flag (signals reach grandchild processes)"
 else
   fail "Dockerfile: tini uses -g flag" "grandchild processes orphaned on SIGTERM"
 fi
 
 # R5: PID files cleaned at startup (idempotency)
-if head -40 scripts/entrypoint.sh | grep -q 'rm.*apollo.pid'; then
+if head -40 $REPO_ROOT/scripts/entrypoint.sh | grep -q 'rm.*apollo.pid'; then
   pass "entrypoint.sh cleans stale PID files at startup"
 else
   fail "entrypoint.sh cleans stale PID files at startup" "stale PID files from previous run cause false crash detection"
 fi
 
 # R5: PID files cleaned in cleanup trap
-if grep -A15 'cleanup()' scripts/entrypoint.sh | grep -q 'apollo.pid'; then
+if grep -A15 'cleanup()' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'apollo.pid'; then
   pass "cleanup trap removes PID files on shutdown"
 else
   fail "cleanup trap removes PID files on shutdown" "PID files persist after shutdown"
@@ -1223,26 +1223,26 @@ echo "--- B8: Curl exit code capture ---"
 
 # Dev-mcp and sheets wait loops should capture curl exit code in $rc (like Apollo does)
 # Previously used bare $? which gets overwritten by the [ ] test
-if grep 'curl.*8003.*healthz' scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
+if grep 'curl.*8003.*healthz' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
   pass "dev-mcp wait captures curl exit code in \$rc"
 else
   fail "dev-mcp wait captures curl exit code in \$rc" "uses bare \$? (overwritten by [ ] test)"
 fi
 
-if grep 'curl.*8004.*healthz' scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
+if grep 'curl.*8004.*healthz' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
   pass "sheets wait captures curl exit code in \$rc"
 else
   fail "sheets wait captures curl exit code in \$rc" "uses bare \$? (overwritten by [ ] test)"
 fi
 
 # register_gateway cleans up temp file on success path (rm before echo)
-if grep -B2 'Registered.*via /gateways' scripts/bootstrap.sh | grep -q 'rm -f.*curl_err'; then
+if grep -B2 'Registered.*via /gateways' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rm -f.*curl_err'; then
   pass "register_gateway cleans temp file on success"
 else
   fail "register_gateway cleans temp file on success" "orphaned temp files on success path"
 fi
 
-if grep -B2 'already exists (409)' scripts/bootstrap.sh | grep -q 'rm -f.*curl_err'; then
+if grep -B2 'already exists (409)' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rm -f.*curl_err'; then
   pass "register_gateway cleans temp file on 409"
 else
   fail "register_gateway cleans temp file on 409" "orphaned temp files on 409 path"
@@ -1255,7 +1255,7 @@ echo "--- B8-R10: Test portability ---"
 
 # Tests should use $REPO_ROOT, not hardcoded absolute paths
 # Exclude the self-referencing grep line from the count
-HARDCODED_COUNT=$(grep -c '/Users/junlin' scripts/test-unit.sh || true)
+HARDCODED_COUNT=$(grep -c '/Users/junlin' $REPO_ROOT/scripts/test-unit.sh || true)
 # Subtract 1 for this grep line itself
 HARDCODED_COUNT=$((HARDCODED_COUNT > 0 ? HARDCODED_COUNT - 1 : 0))
 if [ "$HARDCODED_COUNT" -eq 0 ]; then
@@ -1265,21 +1265,21 @@ else
 fi
 
 # REPO_ROOT should be defined near the top of the file
-if head -10 scripts/test-unit.sh | grep -q 'REPO_ROOT='; then
+if head -10 "$REPO_ROOT/scripts/test-unit.sh" | grep -q 'REPO_ROOT='; then
   pass "REPO_ROOT variable defined for portable paths"
 else
   fail "REPO_ROOT variable defined for portable paths" "tests use hardcoded paths"
 fi
 
 # B8-R9: register_gateway variables should be local
-if grep -A2 'local max_attempts' scripts/bootstrap.sh | grep -q 'payload.*response.*body'; then
+if grep -A2 'local max_attempts' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'payload.*response.*body'; then
   pass "register_gateway declares payload/response/body as local"
 else
   fail "register_gateway declares payload/response/body as local" "variables leak to global scope"
 fi
 
 # B8-R8: Virtual server creation captures curl stderr
-if grep -B3 'CF/servers.*2>' scripts/bootstrap.sh | grep -q 'vs_curl_err'; then
+if grep -B3 'CF/servers.*2>' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'vs_curl_err'; then
   pass "POST /servers captures curl stderr for diagnostics"
 else
   fail "POST /servers captures curl stderr for diagnostics" "curl errors lost with 2>/dev/null"
@@ -1306,10 +1306,44 @@ fi
 
 # B9-R9: Cleanup trap should NOT reference bootstrap's temp files (different $$)
 echo "--- B9-R9: Cleanup trap PID correctness ---"
-if grep -A5 'cleanup()' scripts/entrypoint.sh | grep -q 'jwt-primary-err'; then
+if grep -A5 'cleanup()' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'jwt-primary-err'; then
   fail "Cleanup trap references only entrypoint temp files" "jwt-primary-err is bootstrap's file (different \$\$)"
 else
   pass "Cleanup trap references only entrypoint temp files"
+fi
+
+# =============================================
+# B10: Pagination $after + unbound variable fix
+# =============================================
+echo "--- B10: Pagination and variable safety ---"
+
+# All list queries must accept $after variable for cursor-based pagination
+check_after_var() {
+  local file="$1" name="$2"
+  if grep -q '\$after.*String' "$file" && grep -q 'after:.*\$after' "$file"; then
+    pass "$name accepts \$after variable for pagination"
+  else
+    fail "$name accepts \$after variable for pagination" "endCursor returned but can never be used"
+  fi
+}
+check_after_var "$REPO_ROOT/graphql/products/GetProducts.graphql" "GetProducts"
+check_after_var "$REPO_ROOT/graphql/orders/GetOrders.graphql" "GetOrders"
+check_after_var "$REPO_ROOT/graphql/customers/GetCustomers.graphql" "GetCustomers"
+check_after_var "$REPO_ROOT/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
+
+# $body must be initialized before token fetch loop (set -u safety)
+if grep -B5 'for attempt in 1 2 3 4 5' "$REPO_ROOT/scripts/entrypoint.sh" | grep -q 'body=""'; then
+  pass "entrypoint.sh initializes \$body before token fetch loop"
+else
+  fail "entrypoint.sh initializes \$body before token fetch loop" "unbound variable crash on total connectivity failure"
+fi
+
+# Relative paths fully converted to REPO_ROOT
+BARE_PATHS=$(grep -E '(grep|head|cat|sed) .*(scripts/|deploy/)' "$REPO_ROOT/scripts/test-unit.sh" | grep -cv 'REPO_ROOT' || true)
+if [ "$BARE_PATHS" -eq 0 ]; then
+  pass "All test file references use \$REPO_ROOT"
+else
+  fail "All test file references use \$REPO_ROOT" "$BARE_PATHS bare relative paths remain"
 fi
 
 # =============================================
