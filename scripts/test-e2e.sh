@@ -441,8 +441,10 @@ MALFORMED_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 -X POST \
   "$BASE$MCP_PATH" 2>/dev/null)
 if [ "$MALFORMED_ERR_CODE" = "-32700" ]; then
   result "PASS" "Malformed JSON returns -32700 (Parse Error)"
-elif [ "$MALFORMED_HTTP" = "400" ] || [ -n "$MALFORMED_ERR_CODE" ]; then
-  result "PASS" "Malformed JSON rejected (HTTP $MALFORMED_HTTP, code=$MALFORMED_ERR_CODE)"
+elif [ -n "$MALFORMED_ERR_CODE" ]; then
+  result "PASS" "Malformed JSON returns error (code=$MALFORMED_ERR_CODE, expected -32700)"
+elif [ "$MALFORMED_HTTP" = "400" ]; then
+  result "WARN" "Malformed JSON returns HTTP 400 but no JSON-RPC error code (response may not be valid JSON)"
 else
   result "FAIL" "Malformed JSON rejection" "Expected error/400, got HTTP $MALFORMED_HTTP: $(echo "$MALFORMED_RESP" | head -c 200)"
 fi

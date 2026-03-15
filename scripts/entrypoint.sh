@@ -24,6 +24,8 @@ cleanup() {
   for pid in "${PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true
   done
+  # Clean up temp files that may be orphaned if SIGTERM arrives during token fetch
+  rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log /tmp/jwt-primary-err-$$.log /tmp/jwt-fallback-err-$$.log
   exit 143  # 128 + 15 (SIGTERM)
 }
 trap cleanup SIGTERM SIGINT
@@ -81,6 +83,7 @@ for attempt in 1 2 3 4 5; do
     -d @- 2>/tmp/shopify-curl-err-$$.log) || true
   if [ -n "$response" ]; then
     http_code=$(echo "$response" | tail -1)
+    [[ "$http_code" =~ ^[0-9]+$ ]] || http_code=0
     body=$(echo "$response" | sed '$d')
     token=$(echo "$body" | jq -r '.access_token // empty' 2>/tmp/jq-err-$$.log) || true
     if [ -n "$token" ]; then
@@ -172,7 +175,11 @@ start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 
 # --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
-for i in $(seq 1 180); do
+# ContextForge health timeout must fit within Cloud Run startup probe (240s).
+# Budget: ~115s already elapsed (token fetch + process starts), so ContextForge gets 120s max.
+# Previous value of 180s exceeded the 240s probe, causing pod kills on slow starts.
+CF_HEALTH_TIMEOUT=120
+for i in $(seq 1 "$CF_HEALTH_TIMEOUT"); do
   if curl -sf --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CONTEXTFORGE_PORT}/health" > /dev/null 2>&1; then
     echo "[fluid-intelligence] ContextForge ready after ${i}s [+$(elapsed)s]"
     break
@@ -184,8 +191,8 @@ for i in $(seq 1 180); do
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
   fi
-  if [ "$i" -eq 180 ]; then
-    echo "[fluid-intelligence] FATAL: ContextForge not ready after 180s"
+  if [ "$i" -eq "$CF_HEALTH_TIMEOUT" ]; then
+    echo "[fluid-intelligence] FATAL: ContextForge not ready after ${CF_HEALTH_TIMEOUT}s [+$(elapsed)s]"
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
   fi

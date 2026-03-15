@@ -987,6 +987,68 @@ else
 fi
 
 # =============================================
+# MIRROR-SHINE D1: Timeout arithmetic
+# =============================================
+echo "--- D1: Timeout arithmetic ---"
+
+# ContextForge health timeout must be <= 120s (was 180s, exceeds 240s probe budget)
+CF_TIMEOUT=$(grep 'CF_HEALTH_TIMEOUT=' scripts/entrypoint.sh | head -1 | sed 's/.*CF_HEALTH_TIMEOUT=//' | grep -o '^[0-9]*') || CF_TIMEOUT=0
+if [ "$CF_TIMEOUT" -le 120 ] && [ "$CF_TIMEOUT" -gt 0 ]; then
+  pass "ContextForge health timeout ($CF_TIMEOUT s) fits within startup probe budget"
+else
+  fail "ContextForge health timeout fits within startup probe" "CF_HEALTH_TIMEOUT=$CF_TIMEOUT (must be <= 120)"
+fi
+
+# Startup probe allows 240s (48 * 5s). Auth-proxy must start before that.
+# Token fetch worst case: 5 * 15s (max_time) + 4 sleeps (2+4+6+8=20s) = 95s
+# (No sleep after 5th attempt — it either exits or succeeds)
+# Process starts: 4 * 2s = 8s
+# ContextForge health: CF_TIMEOUT
+# Auth-proxy start: 2s
+# Total must be < 240s (startup probe budget)
+WORST_CASE=$((95 + 8 + CF_TIMEOUT + 2))
+if [ "$WORST_CASE" -lt 240 ]; then
+  pass "Worst-case startup (${WORST_CASE}s) fits within 240s probe"
+else
+  fail "Worst-case startup fits within 240s probe" "${WORST_CASE}s >= 240s"
+fi
+
+# Cleanup trap includes temp file removal
+if grep -A10 'cleanup()' scripts/entrypoint.sh | grep -q 'shopify-curl-err'; then
+  pass "cleanup trap removes orphaned temp files"
+else
+  fail "cleanup trap removes orphaned temp files" "temp files not cleaned on SIGTERM"
+fi
+
+# =============================================
+# MIRROR-SHINE D4: Contract compliance
+# =============================================
+echo "--- D4: Contract compliance ---"
+
+# bootstrap.sh should use parse_http_code (not raw tail -1) for HTTP status extraction
+# Exclude the tail -1 inside parse_http_code itself (that's the safe wrapper)
+BOOTSTRAP_RAW_TAIL=$(grep 'tail -1' scripts/bootstrap.sh | grep -vc 'parse_http_code\|code=') || BOOTSTRAP_RAW_TAIL=0
+if [ "$BOOTSTRAP_RAW_TAIL" -eq 0 ]; then
+  pass "bootstrap.sh uses parse_http_code (no raw tail -1)"
+else
+  fail "bootstrap.sh uses parse_http_code" "$BOOTSTRAP_RAW_TAIL raw tail -1 calls remain"
+fi
+
+# parse_http_code helper exists in bootstrap.sh
+if grep -q 'parse_http_code()' scripts/bootstrap.sh; then
+  pass "bootstrap.sh has parse_http_code helper"
+else
+  fail "bootstrap.sh has parse_http_code helper" "function not found"
+fi
+
+# entrypoint.sh validates http_code is numeric after extraction
+if grep -A1 'tail -1' scripts/entrypoint.sh | grep -q '\[0-9\]'; then
+  pass "entrypoint.sh validates http_code is numeric"
+else
+  fail "entrypoint.sh validates http_code is numeric" "no numeric check after tail -1"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

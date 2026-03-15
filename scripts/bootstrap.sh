@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+# Extract numeric HTTP code from curl response; defaults to 0 if non-numeric
+# curl -w "\n%{http_code}" appends status as last line, but edge cases (empty body,
+# connection failure) can produce non-numeric output that breaks arithmetic comparisons.
+parse_http_code() {
+  local code
+  code=$(echo "$1" | tail -1)
+  [[ "$code" =~ ^[0-9]+$ ]] && echo "$code" || echo "0"
+}
+
 # Generate admin JWT for registration (10 min expiry to cover slow bridge starts:
 # worst case Apollo 60s + dev-mcp 90s + sheets 60s = 3.5 min of waiting)
 # Pass secrets via env vars to avoid shell injection (quotes in values would break inline Python)
@@ -66,7 +75,7 @@ register_gateway() {
       -H "Content-Type: application/json" \
       -d "$payload" \
       "$CF/gateways" 2>/dev/null)
-    http_code=$(echo "$response" | tail -1)
+    http_code=$(parse_http_code "$response")
     body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
@@ -203,7 +212,7 @@ vs_response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X P
   -H "Content-Type: application/json" \
   -d "$vs_payload" \
   "$CF/servers" 2>/dev/null)
-vs_code=$(echo "$vs_response" | tail -1)
+vs_code=$(parse_http_code "$vs_response")
 vs_body=$(echo "$vs_response" | sed '$d')
 
 if [ "$vs_code" -ge 200 ] && [ "$vs_code" -lt 300 ]; then
