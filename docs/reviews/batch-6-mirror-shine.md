@@ -1,7 +1,7 @@
 # Code Review Batch 6 — Mirror Shine
 
 **Date**: 2026-03-15
-**Tests**: 126/126 unit tests passing
+**Tests**: 130/130 unit tests passing
 **Method**: Brainstorming + Systematic Debugging — invented 6 debugging dimensions, then applied Phase 1-4 rigor to each
 
 ## Approach
@@ -19,7 +19,7 @@ Six debugging dimensions were brainstormed, each requiring a different investiga
 | **D5: Validation Completeness** | Every input validated? Every code path tested? Any bypass routes? |
 | **D6: Observability Gaps** | Can every failure be diagnosed from logs alone? |
 
-## Fixes Applied (10 fixes)
+## Fixes Applied (14 fixes)
 
 | Dimension | Severity | Issue | Fix |
 |-----------|----------|-------|-----|
@@ -33,6 +33,10 @@ Six debugging dimensions were brainstormed, each requiring a different investiga
 | **D5** | Medium | VS_ID not validated after virtual server creation — empty ID produces `/servers//mcp` (404) | Added null/empty check with FATAL exit and diagnostic output |
 | **D5** | Medium | `GetInventoryLevels.graphql` missing `endCursor` in pageInfo — pagination breaks on page 2+ | Added `endCursor` (missed in R46 batch) |
 | **D6** | Medium | `register_gateway` curl errors (connection refused, DNS, timeout) sent to `/dev/null` | Capture to temp file, log on failure |
+| **D5** | **High** | `DB_USER`/`DB_NAME` interpolated into DATABASE_URL without validation — `@?/` chars corrupt URI | Added alphanumeric regex check |
+| **D5** | Medium | PID file contents not validated as numeric — corrupted file triggers false crash detection | Added `^[0-9]+$` check on all 3 PID reads |
+| **D5** | Medium | JWT token format not validated — Python warnings in stdout produce garbage token | Added header.payload.signature regex check |
+| **D5** | Medium | Virtual server deletion assumes single ID — multiple stale entries leave orphans | Changed to `while read` loop (matches gateway pattern) |
 
 ## Stale Agent Findings (triaged from previous session)
 
@@ -75,9 +79,9 @@ Cloud Run startup probe: `failureThreshold=48 × periodSeconds=5 = 240s`
 | Metric | Value |
 |--------|-------|
 | Debugging dimensions | 6 |
-| Fixes applied | 10 |
-| Unit tests (total) | 126 |
-| New tests this batch | 11 |
+| Fixes applied | 14 |
+| Unit tests (total) | 130 |
+| New tests this batch | 17 |
 | Stale agents triaged | 17 |
 | Genuine findings from stale agents | 6 |
 | False positives / already fixed | 11 |
@@ -88,7 +92,7 @@ Cloud Run startup probe: `failureThreshold=48 × periodSeconds=5 = 240s`
 |--------|-------|
 | Total review rounds | 51+ |
 | Total debugging dimensions | 6 |
-| Total code fixes | 48+ |
-| Total unit tests | 126 |
+| Total code fixes | 52+ |
+| Total unit tests | 130 |
 | E2E tests | 21 |
 | Files modified | 18+ |
