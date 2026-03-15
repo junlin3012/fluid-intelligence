@@ -48,6 +48,11 @@ def install(request: Request):
     received_hmac = params.pop("hmac", "")
     timestamp = params.get("timestamp", "")
 
+    # Shopify loads application_url in an iframe after install.
+    # When there's no HMAC, show the app home page instead of 400.
+    if not received_hmac:
+        return HTMLResponse(content=_app_home_html(shop), status_code=200)
+
     if not validate_shop_hostname(shop):
         return Response("Invalid shop hostname", status_code=400)
 
@@ -117,16 +122,7 @@ def callback(request: Request):
     except Exception as e:
         log.warning(f"Could not register webhooks: {e}")
 
-    response = HTMLResponse(
-        content=f"""
-        <html><body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-            <h1>Installation Complete</h1>
-            <p>Your Shopify store <strong>{shop}</strong> has been connected.</p>
-            <a href="https://{shop}/admin">Return to Shopify Admin</a>
-        </body></html>
-        """,
-        status_code=200,
-    )
+    response = HTMLResponse(content=_success_html(shop), status_code=200)
     response.delete_cookie("shopify_nonce")
     response.delete_cookie("shopify_nonce_sig")
     return response
@@ -183,6 +179,151 @@ def register_webhooks(shop: str, access_token: str):
             log.info(f"Registered webhook {wh['topic']} for {shop}: HTTP {r.status_code}")
         except Exception as e:
             log.warning(f"Failed to register webhook {wh['topic']} for {shop}: {e}")
+
+
+_BASE_STYLE = """
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Proza+Libre:wght@400;600;700&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Proza Libre', Georgia, serif;
+    background: #FFFBF7;
+    color: #2E2725;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .card {
+    background: #F6F1EB;
+    border: 1.5px solid #E5DCD2;
+    border-radius: 12px;
+    padding: 3rem 2.5rem;
+    max-width: 480px;
+    width: 100%;
+    text-align: center;
+  }
+  .logo {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 1.5rem;
+    background: #78401F;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: #FFFBF7;
+    font-weight: 700;
+  }
+  h1 {
+    color: #78401F;
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+  }
+  p {
+    color: #2E2725;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+  }
+  .shop-name {
+    display: inline-block;
+    background: #FFFBF7;
+    border: 1px solid #E5DCD2;
+    border-radius: 6px;
+    padding: 0.35rem 0.75rem;
+    font-weight: 600;
+    color: #401410;
+    font-size: 0.9rem;
+    margin: 0.5rem 0 1.25rem;
+  }
+  .btn {
+    display: inline-block;
+    background: #78401F;
+    color: #FFFBF7;
+    text-decoration: none;
+    padding: 0.7rem 1.75rem;
+    border-radius: 8px;
+    font-family: 'Proza Libre', Georgia, serif;
+    font-weight: 600;
+    font-size: 0.95rem;
+    transition: background 0.2s;
+  }
+  .btn:hover { background: #5E281F; }
+  .divider {
+    height: 1px;
+    background: #E5DCD2;
+    margin: 1.5rem 0;
+  }
+  .footer {
+    color: #78401F;
+    font-size: 0.8rem;
+    opacity: 0.7;
+  }
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: #083E43;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+</style>
+"""
+
+
+def _success_html(shop: str) -> str:
+    safe_shop = shop.replace("<", "&lt;").replace(">", "&gt;")
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connected — Fluid Intelligence</title>
+{_BASE_STYLE}
+</head><body>
+<div class="card">
+  <div class="logo">FI</div>
+  <h1>Connected Successfully</h1>
+  <p>Your Shopify store is now linked to Fluid Intelligence.</p>
+  <div class="shop-name"><span class="status-dot"></span>{safe_shop}</div>
+  <p style="font-size:0.85rem; color:#78401F;">
+    AI clients can now access your store data through the MCP gateway.
+  </p>
+  <div class="divider"></div>
+  <a class="btn" href="https://{safe_shop}/admin">Return to Shopify Admin</a>
+  <div class="divider"></div>
+  <p class="footer">Fluid Intelligence — Universal MCP Gateway</p>
+</div>
+</body></html>"""
+
+
+def _app_home_html(shop: str) -> str:
+    safe_shop = shop.replace("<", "&lt;").replace(">", "&gt;") if shop else ""
+    shop_line = f'<div class="shop-name"><span class="status-dot"></span>{safe_shop}</div>' if safe_shop else ""
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fluid Intelligence</title>
+{_BASE_STYLE}
+</head><body>
+<div class="card">
+  <div class="logo">FI</div>
+  <h1>Fluid Intelligence</h1>
+  <p>Universal MCP Gateway for Shopify</p>
+  {shop_line}
+  <div class="divider"></div>
+  <p style="font-size:0.85rem;">
+    This app connects your Shopify store to AI clients
+    via the Model Context Protocol. No configuration is
+    needed here — connect through your MCP client.
+  </p>
+  <div class="divider"></div>
+  <p class="footer">Powered by Fluid Intelligence</p>
+</div>
+</body></html>"""
 
 
 # Include webhook routes

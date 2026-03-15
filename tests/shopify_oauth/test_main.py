@@ -37,6 +37,19 @@ def test_install_redirects_to_shopify():
     assert "admin/oauth/authorize" in r.headers["location"]
     assert "client_id=test_client_id" in r.headers["location"]
 
+def test_install_shows_app_home_without_hmac():
+    """When Shopify loads application_url in iframe (no HMAC), show app home page."""
+    r = client.get("/auth/install", params={"shop": "test-store.myshopify.com"})
+    assert r.status_code == 200
+    assert "Fluid Intelligence" in r.text
+    assert "font-family" in r.text  # Has styling
+
+def test_install_shows_app_home_no_params():
+    """Bare /auth/install with no params at all returns app home."""
+    r = client.get("/auth/install")
+    assert r.status_code == 200
+    assert "Fluid Intelligence" in r.text
+
 def test_install_rejects_invalid_shop():
     params = {"shop": "evil.com", "timestamp": str(int(time.time()))}
     params["hmac"] = make_hmac(params)
@@ -79,5 +92,7 @@ def test_callback_exchanges_token(mock_shop_id, mock_webhooks, mock_store, mock_
         cb_params["hmac"] = make_hmac(cb_params)
         r = session_client.get("/auth/callback", params=cb_params)
         assert r.status_code == 200
+        assert "Connected Successfully" in r.text
+        assert "#78401F" in r.text  # Brand color present
         mock_exchange.assert_called_once()
         mock_store.assert_called_once()
