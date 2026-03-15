@@ -23,13 +23,14 @@ echo "[bootstrap] JWT token generated"
 
 CF="http://localhost:${CONTEXTFORGE_PORT:-4444}"
 
-# Register a gateway (backend MCP server) with ContextForge
-register_gateway() {
+# Register a backend MCP server with ContextForge via /servers endpoint
+# This endpoint auto-discovers tools from the backend (unlike /gateways)
+register_server() {
   local name="$1" url="$2" transport="$3"
 
-  # Check if already registered (container restart case)
+  # Check if already registered via /servers list
   if curl -sf -H "Authorization: Bearer $TOKEN" \
-    "$CF/gateways" 2>/dev/null | \
+    "$CF/servers" 2>/dev/null | \
     jq -e ".[] | select(.name==\"$name\")" > /dev/null 2>&1; then
     echo "[bootstrap] $name already registered, skipping"
     return 0
@@ -40,13 +41,13 @@ register_gateway() {
     response=$(curl -s -w "\n%{http_code}" -X POST \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}" \
-      "$CF/gateways" 2>&1)
+      -d "{\"server\":{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}}" \
+      "$CF/servers" 2>&1)
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | head -n -1)
 
     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-      echo "[bootstrap] Registered $name"
+      echo "[bootstrap] Registered $name via /servers"
       return 0
     fi
 
@@ -74,7 +75,7 @@ for i in $(seq 1 30); do
 done
 
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
-register_gateway "apollo-shopify" "http://localhost:8000/mcp" "STREAMABLEHTTP"
+register_server "apollo-shopify" "http://localhost:8000/mcp" "streamablehttp"
 
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
 echo "[bootstrap] Waiting for dev-mcp bridge..."
@@ -85,7 +86,7 @@ for i in $(seq 1 90); do
 done
 
 echo "[bootstrap] Registering dev-mcp (Shopify docs)..."
-register_gateway "shopify-dev-mcp" "http://localhost:8003/sse" "SSE"
+register_server "shopify-dev-mcp" "http://localhost:8003/sse" "sse"
 
 # Wait for google-sheets bridge
 echo "[bootstrap] Waiting for google-sheets bridge..."
@@ -96,6 +97,6 @@ for i in $(seq 1 60); do
 done
 
 echo "[bootstrap] Registering google-sheets..."
-register_gateway "google-sheets" "http://localhost:8004/sse" "SSE"
+register_server "google-sheets" "http://localhost:8004/sse" "sse"
 
 echo "[bootstrap] All 3 backends registered"
