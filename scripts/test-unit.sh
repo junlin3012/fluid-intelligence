@@ -1069,6 +1069,25 @@ else
 fi
 
 # =============================================
+# MIRROR-SHINE D3: Data flow integrity
+# =============================================
+echo "--- D3: Data flow integrity ---"
+
+# encoded_pw must be guarded against empty result
+if grep -A3 'encoded_pw=' scripts/entrypoint.sh | grep -q 'FATAL.*empty'; then
+  pass "entrypoint.sh guards against empty encoded_pw"
+else
+  fail "entrypoint.sh guards against empty encoded_pw" "empty password produces password-less DATABASE_URL"
+fi
+
+# Shopify token request uses --data-urlencode (not raw printf)
+if grep -q 'data-urlencode.*client_id' scripts/entrypoint.sh; then
+  pass "entrypoint.sh URL-encodes Shopify credentials in token request"
+else
+  fail "entrypoint.sh URL-encodes Shopify credentials" "raw printf with %s — special chars in client_id/secret break form body"
+fi
+
+# =============================================
 # MIRROR-SHINE D5: Validation completeness
 # =============================================
 echo "--- D5: Validation completeness ---"

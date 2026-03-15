@@ -68,6 +68,10 @@ fi
 # --- Env var wiring ---
 # URL-encode DB_PASSWORD to handle special chars (@, ?, /, %) that break connection strings
 encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))")
+if [ -z "$encoded_pw" ]; then
+  echo "[fluid-intelligence] FATAL: URL-encoding DB_PASSWORD produced empty result"
+  exit 1
+fi
 export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
 export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
@@ -86,11 +90,12 @@ for attempt in 1 2 3 4 5; do
   # Pass credentials via stdin to avoid exposing SHOPIFY_CLIENT_SECRET in /proc/cmdline
   # Capture HTTP status separately for diagnostics on failure
   http_code=0
-  response=$(printf 'grant_type=client_credentials&client_id=%s&client_secret=%s' \
-    "$SHOPIFY_CLIENT_ID" "$SHOPIFY_CLIENT_SECRET" | \
-    curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 -X POST "$TOKEN_ENDPOINT" \
+  response=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 15 -X POST "$TOKEN_ENDPOINT" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d @- 2>/tmp/shopify-curl-err-$$.log) || true
+    --data-urlencode "grant_type=client_credentials" \
+    --data-urlencode "client_id=$SHOPIFY_CLIENT_ID" \
+    --data-urlencode "client_secret=$SHOPIFY_CLIENT_SECRET" \
+    2>/tmp/shopify-curl-err-$$.log) || true
   if [ -n "$response" ]; then
     http_code=$(echo "$response" | tail -1)
     [[ "$http_code" =~ ^[0-9]+$ ]] || http_code=0
