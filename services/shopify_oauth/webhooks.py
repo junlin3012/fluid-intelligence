@@ -14,6 +14,8 @@ from services.shopify_oauth.db import get_connection, mark_uninstalled
 log = logging.getLogger("shopify-oauth")
 router = APIRouter()
 
+MAX_WEBHOOK_BODY = 1_048_576  # 1 MB — Shopify payloads are typically < 10 KB
+
 
 def verify_webhook_hmac(body: bytes, received_hmac: str) -> bool:
     expected = base64.b64encode(
@@ -36,6 +38,9 @@ def mark_shop_uninstalled(shop_domain: str):
 
 @router.post("/webhooks/app-uninstalled")
 async def app_uninstalled(request: Request):
+    content_length = int(request.headers.get("content-length", 0))
+    if content_length > MAX_WEBHOOK_BODY:
+        return Response("Payload too large", status_code=413)
     body = await request.body()
     hmac_header = request.headers.get("X-Shopify-Hmac-SHA256", "")
     if not verify_webhook_hmac(body, hmac_header):
@@ -53,6 +58,9 @@ async def app_uninstalled(request: Request):
 
 @router.post("/webhooks/gdpr/{topic}")
 async def gdpr_webhook(topic: str, request: Request):
+    content_length = int(request.headers.get("content-length", 0))
+    if content_length > MAX_WEBHOOK_BODY:
+        return Response("Payload too large", status_code=413)
     body = await request.body()
     hmac_header = request.headers.get("X-Shopify-Hmac-SHA256", "")
     if not verify_webhook_hmac(body, hmac_header):
