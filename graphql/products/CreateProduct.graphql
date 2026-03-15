@@ -5,7 +5,7 @@ mutation CreateProduct(
   $vendor: String
   $status: ProductStatus = DRAFT
   $tags: [String!]
-  $variants: [ProductVariantSetInput!]
+  $variants: [ProductSetVariantInput!]
 ) {
   productSet(
     synchronous: true

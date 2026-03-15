@@ -37,15 +37,19 @@ CF="http://127.0.0.1:${CONTEXTFORGE_PORT:-4444}"
 register_gateway() {
   local name="$1" url="$2" transport="$3"
 
-  # Delete any existing registration (stale URL/transport from previous deploy)
-  local existing_id
-  existing_id=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" \
+  # Delete any existing registrations (stale URL/transport from previous deploy)
+  # Use head -1 to handle multiple entries with the same name (delete each individually)
+  local existing_ids
+  existing_ids=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" \
     "$CF/gateways" 2>/dev/null | \
     jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null) || true
-  if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
-    echo "[bootstrap] Deleting stale $name (id=$existing_id)"
-    curl -sf --max-time 10 -X DELETE -H "Authorization: Bearer $TOKEN" \
-      "$CF/gateways/$existing_id" > /dev/null 2>&1 || true
+  if [ -n "$existing_ids" ]; then
+    echo "$existing_ids" | while read -r eid; do
+      [ -z "$eid" ] || [ "$eid" = "null" ] && continue
+      echo "[bootstrap] Deleting stale $name (id=$eid)"
+      curl -sf --max-time 10 -X DELETE -H "Authorization: Bearer $TOKEN" \
+        "$CF/gateways/$eid" > /dev/null 2>&1 || true
+    done
   fi
 
   local max_attempts=3 attempt=1 http_code=0
@@ -82,8 +86,17 @@ register_gateway() {
 
 # Wait for Apollo bridge before registering it
 # SSE endpoint is streaming (never completes), so check TCP + HTTP response
+# Check PID files written by entrypoint.sh to fast-fail if bridge crashes
 echo "[bootstrap] Waiting for Apollo bridge..."
 for i in $(seq 1 60); do
+  # Fast-fail: check if bridge process is still alive (PID file from entrypoint)
+  if [ -f /tmp/apollo.pid ]; then
+    BRIDGE_PID=$(cat /tmp/apollo.pid 2>/dev/null)
+    if [ -n "$BRIDGE_PID" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+      echo "[bootstrap] FATAL: Apollo bridge process (PID $BRIDGE_PID) crashed"
+      exit 1
+    fi
+  fi
   # curl exit 28 = timeout (connected but SSE stream) = success
   rc=0; curl -s --connect-timeout 2 --max-time 1 http://127.0.0.1:8000/sse -o /dev/null 2>&1 || rc=$?
   [ "$rc" -eq 0 ] || [ "$rc" -eq 28 ] && break
@@ -97,6 +110,13 @@ register_gateway "apollo-shopify" "http://127.0.0.1:8000/sse" "SSE"
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
 echo "[bootstrap] Waiting for dev-mcp bridge..."
 for i in $(seq 1 90); do
+  if [ -f /tmp/devmcp.pid ]; then
+    BRIDGE_PID=$(cat /tmp/devmcp.pid 2>/dev/null)
+    if [ -n "$BRIDGE_PID" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+      echo "[bootstrap] FATAL: dev-mcp bridge process (PID $BRIDGE_PID) crashed"
+      exit 1
+    fi
+  fi
   curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/healthz > /dev/null 2>&1 && break
   [ "$i" -eq 90 ] && { echo "[bootstrap] FATAL: dev-mcp bridge not ready after 90s"; exit 1; }
   sleep 1
@@ -108,6 +128,13 @@ register_gateway "shopify-dev-mcp" "http://127.0.0.1:8003/sse" "SSE"
 # Wait for google-sheets bridge
 echo "[bootstrap] Waiting for google-sheets bridge..."
 for i in $(seq 1 60); do
+  if [ -f /tmp/sheets.pid ]; then
+    BRIDGE_PID=$(cat /tmp/sheets.pid 2>/dev/null)
+    if [ -n "$BRIDGE_PID" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+      echo "[bootstrap] FATAL: google-sheets bridge process (PID $BRIDGE_PID) crashed"
+      exit 1
+    fi
+  fi
   curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8004/healthz > /dev/null 2>&1 && break
   [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: google-sheets bridge not ready after 60s"; exit 1; }
   sleep 1

@@ -23,6 +23,7 @@ query GetOrders($first: Int = 10, $query: String) {
     }
     pageInfo {
       hasNextPage
+      endCursor
     }
   }
 }

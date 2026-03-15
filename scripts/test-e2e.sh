@@ -117,6 +117,7 @@ LOGIN_HEADERS=$(curl -s -D - -o /dev/null --max-time 10 \
 AUTH_SESSION=$(echo "$LOGIN_HEADERS" | grep -oi "location: /.idp/auth/[a-f0-9-]*" | head -1 | sed 's/[Ll]ocation: //')
 
 AUTH_CODE=""
+RETURNED_STATE=""
 if [ -n "$AUTH_SESSION" ]; then
   CODE_REDIRECT=$(curl -s -D - -o /dev/null --max-time 10 \
     -b "$COOKIE_JAR" -c "$COOKIE_JAR" \

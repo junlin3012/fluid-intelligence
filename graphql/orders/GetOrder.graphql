@@ -58,6 +58,7 @@ query GetOrder($id: ID!) {
       }
       pageInfo {
         hasNextPage
+        endCursor
       }
     }
   }

@@ -8,18 +8,24 @@ echo "[fluid-intelligence] Starting services..."
 
 # --- Graceful shutdown (set trap BEFORE starting processes) ---
 PIDS=()
+SHUTTING_DOWN=0
 cleanup() {
+  SHUTTING_DOWN=1
   echo "[fluid-intelligence] SIGTERM received, shutting down..."
   for pid in "${PIDS[@]}"; do
     kill "$pid" 2>/dev/null || true
   done
-  wait
-  exit 0
+  for pid in "${PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  exit 143  # 128 + 15 (SIGTERM)
 }
 trap cleanup SIGTERM SIGINT
 
 # --- Env var wiring ---
-export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${DB_PASSWORD}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
+# URL-encode DB_PASSWORD to handle special chars (@, ?, /, %) that break connection strings
+encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))")
+export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
 export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
 export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
@@ -48,7 +54,7 @@ if ! [[ "${MCPGATEWAY_PORT:-4444}" =~ ^[0-9]+$ ]]; then
   echo "[fluid-intelligence] FATAL: MCPGATEWAY_PORT must be numeric"
   exit 1
 fi
-if [[ -n "${EXTERNAL_URL:-}" ]] && ! [[ "$EXTERNAL_URL" =~ ^[a-zA-Z0-9._-]+(\.[a-zA-Z0-9._-]+)+$ ]]; then
+if [[ -n "${EXTERNAL_URL:-}" ]] && ! [[ "$EXTERNAL_URL" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*(\.[a-zA-Z0-9][a-zA-Z0-9_-]*)+$ ]]; then
   echo "[fluid-intelligence] FATAL: EXTERNAL_URL contains invalid characters"
   exit 1
 fi
@@ -115,6 +121,7 @@ python3 -m mcpgateway.translate \
   --port 8000 &
 APOLLO_PID=$!
 PIDS+=("$APOLLO_PID")
+echo "$APOLLO_PID" > /tmp/apollo.pid
 start_and_verify "Apollo bridge" "$APOLLO_PID"
 
 # 2. IBM ContextForge (Python, gateway core)
@@ -137,6 +144,7 @@ python3 -m mcpgateway.translate \
   --port 8003 &
 TRANSLATE_DEVMCP_PID=$!
 PIDS+=("$TRANSLATE_DEVMCP_PID")
+echo "$TRANSLATE_DEVMCP_PID" > /tmp/devmcp.pid
 start_and_verify "dev-mcp bridge" "$TRANSLATE_DEVMCP_PID"
 
 # 4. google-sheets bridge (stdio→SSE)
@@ -146,6 +154,7 @@ python3 -m mcpgateway.translate \
   --port 8004 &
 TRANSLATE_SHEETS_PID=$!
 PIDS+=("$TRANSLATE_SHEETS_PID")
+echo "$TRANSLATE_SHEETS_PID" > /tmp/sheets.pid
 start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 
 # --- Wait for ContextForge health before starting auth proxy ---
@@ -194,10 +203,14 @@ echo "[fluid-intelligence] Running bootstrap..."
 BOOTSTRAP_PID=$!
 PIDS+=("$BOOTSTRAP_PID")
 wait "$BOOTSTRAP_PID" || {
+  # If SIGTERM arrived during bootstrap wait, let cleanup() handle it
+  [ "$SHUTTING_DOWN" -eq 1 ] && exit 143
   echo "[fluid-intelligence] FATAL: bootstrap failed — backend registration incomplete"
   for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   exit 1
 }
+# Remove completed bootstrap PID from PIDS to avoid killing a reused PID
+PIDS=( "${PIDS[@]/$BOOTSTRAP_PID}" )
 
 echo "[fluid-intelligence] All services running [+$(elapsed)s]"
 echo "  Apollo bridge:  PID=$APOLLO_PID  :8000"
