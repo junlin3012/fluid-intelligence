@@ -8,6 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY services/shopify_oauth/ services/shopify_oauth/
 RUN touch services/__init__.py
 
+RUN adduser --disabled-password --no-create-home appuser
+
+USER appuser
 ENV PORT=8080
 EXPOSE 8080
 
