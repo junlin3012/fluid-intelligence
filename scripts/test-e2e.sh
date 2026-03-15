@@ -223,15 +223,42 @@ mcp_post() {
 
 # Initialize
 INIT=$(mcp_post "/mcp" '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"e2e-test","version":"1.0"}}}')
+INIT_OK=false
 if echo "$INIT" | jq -e '.result.serverInfo' > /dev/null 2>&1; then
   SERVER=$(echo "$INIT" | jq -r '.result.serverInfo.name')
   result "PASS" "MCP initialize (server=$SERVER)"
+  INIT_OK=true
 else
   result "FAIL" "MCP initialize" "$(echo "$INIT" | head -c 200)"
 fi
 
-# Send initialized notification
-mcp_post "/mcp" '{"jsonrpc":"2.0","method":"notifications/initialized"}' > /dev/null 2>&1
+# Validate protocolVersion in response
+PROTO_VER=$(echo "$INIT" | jq -r '.result.protocolVersion // empty' 2>/dev/null)
+if [ -n "$PROTO_VER" ]; then
+  result "PASS" "Protocol version: $PROTO_VER"
+else
+  result "FAIL" "Protocol version" "Missing .result.protocolVersion"
+fi
+
+# Validate capabilities advertised
+if echo "$INIT" | jq -e '.result.capabilities.tools' > /dev/null 2>&1; then
+  result "PASS" "Server advertises tools capability"
+else
+  result "FAIL" "Server capabilities" "Missing .result.capabilities.tools"
+fi
+
+# Send initialized notification (only after successful init per MCP spec)
+if [ "$INIT_OK" = true ]; then
+  mcp_post "/mcp" '{"jsonrpc":"2.0","method":"notifications/initialized"}' > /dev/null 2>&1
+fi
+
+# Ping (MCP servers MUST support ping)
+PING=$(mcp_post "/mcp" '{"jsonrpc":"2.0","id":99,"method":"ping"}')
+if echo "$PING" | jq -e '.result' > /dev/null 2>&1; then
+  result "PASS" "MCP ping"
+else
+  result "FAIL" "MCP ping" "$(echo "$PING" | head -c 200)"
+fi
 
 # tools/list
 TOOLS=$(mcp_post "/mcp" '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
