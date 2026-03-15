@@ -175,7 +175,7 @@ start_and_verify "ContextForge" "$CONTEXTFORGE_PID"
 
 # 3. dev-mcp bridge (stdio→SSE)
 /app/.venv/bin/python -m mcpgateway.translate \
-  --stdio "npx -y @shopify/dev-mcp@latest" \
+  --stdio "npx -y @shopify/dev-mcp@1.7.1" \
   --expose-sse \
   --port 8003 &
 TRANSLATE_DEVMCP_PID=$!
@@ -185,7 +185,7 @@ start_and_verify "dev-mcp bridge" "$TRANSLATE_DEVMCP_PID"
 
 # 4. google-sheets bridge (stdio→SSE)
 /app/.venv/bin/python -m mcpgateway.translate \
-  --stdio "uv tool run mcp-google-sheets@latest --transport stdio" \
+  --stdio "uv tool run mcp-google-sheets@0.6.0 --transport stdio" \
   --expose-sse \
   --port 8004 &
 TRANSLATE_SHEETS_PID=$!

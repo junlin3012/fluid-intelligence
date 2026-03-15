@@ -1389,6 +1389,25 @@ else
 fi
 
 # =============================================
+# B15-R6: Runtime dependency version pinning
+# =============================================
+echo "--- B15-R6: Runtime reproducibility ---"
+
+ENTRYPOINT="$REPO_ROOT/scripts/entrypoint.sh"
+# dev-mcp and google-sheets should NOT use @latest at runtime
+if grep -q '@shopify/dev-mcp@latest' "$ENTRYPOINT"; then
+  fail "dev-mcp runtime version is pinned" "uses @latest — cold starts are non-reproducible"
+else
+  pass "dev-mcp runtime version is pinned"
+fi
+
+if grep -q 'mcp-google-sheets@latest' "$ENTRYPOINT"; then
+  fail "mcp-google-sheets runtime version is pinned" "uses @latest — cold starts are non-reproducible"
+else
+  pass "mcp-google-sheets runtime version is pinned"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""
