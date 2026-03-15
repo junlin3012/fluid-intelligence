@@ -144,10 +144,16 @@ fi
 # 3d. Exchange auth code for access token
 ACCESS_TOKEN=""
 if [ -n "$AUTH_CODE" ]; then
-  TOKEN_RESP=$(curl -sf --max-time 10 -X POST \
+  # Use --data-urlencode to safely handle special chars in auth code/secrets
+  TOKEN_RESP=$(curl -s --max-time 10 -X POST \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "grant_type=authorization_code&code=$AUTH_CODE&redirect_uri=$REDIRECT_URI&client_id=$CLIENT_ID&client_secret=$CLIENT_SECRET&code_verifier=$CODE_VERIFIER" \
-    "$BASE/.idp/token" 2>&1)
+    --data-urlencode "grant_type=authorization_code" \
+    --data-urlencode "code=$AUTH_CODE" \
+    --data-urlencode "redirect_uri=$REDIRECT_URI" \
+    --data-urlencode "client_id=$CLIENT_ID" \
+    --data-urlencode "client_secret=$CLIENT_SECRET" \
+    --data-urlencode "code_verifier=$CODE_VERIFIER" \
+    "$BASE/.idp/token" 2>/dev/null)
   ACCESS_TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty' 2>/dev/null)
   EXPIRES_IN=$(echo "$TOKEN_RESP" | jq -r '.expires_in // "?"' 2>/dev/null)
   TOKEN_TYPE=$(echo "$TOKEN_RESP" | jq -r '.token_type // empty' 2>/dev/null)
