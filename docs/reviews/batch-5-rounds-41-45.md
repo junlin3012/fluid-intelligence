@@ -87,3 +87,5 @@ These require design decisions, upstream changes, or infrastructure work:
 | Low | Targeted `chown` in Dockerfile.base (skip venv walk) |
 | Low | Remove `npm` from system packages if `npx` bundled with nodejs |
 | Low | `psycopg2-binary` version pin |
+| Medium | Build-time schema refresh — `shopify-schema.graphql` baked into image will drift from live API on version bump |
+| Low | E2E test for MCP protocol version `2025-03-26` — currently only tests `2024-11-05` |
