@@ -109,17 +109,18 @@ curl -sL --max-time 10 -c "$COOKIE_JAR" \
   "$BASE/.idp/auth?response_type=code&client_id=$CLIENT_ID&redirect_uri=$REDIRECT_URI&state=$STATE&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256" \
   -o /dev/null 2>&1
 
-LOGIN_HEADERS=$(curl -sv --max-time 10 \
+# Use -D to capture headers (not -v which leaks password in POST body to stderr)
+LOGIN_HEADERS=$(curl -s -D - -o /dev/null --max-time 10 \
   -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
   -X POST -d "password=$(AUTH_PASSWORD="$AUTH_PASSWORD" python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['AUTH_PASSWORD']))")" \
-  "$BASE/.auth/login" 2>&1)
+  "$BASE/.auth/login" 2>/dev/null)
 AUTH_SESSION=$(echo "$LOGIN_HEADERS" | grep -oi "location: /.idp/auth/[a-f0-9-]*" | head -1 | sed 's/[Ll]ocation: //')
 
 AUTH_CODE=""
 if [ -n "$AUTH_SESSION" ]; then
-  CODE_REDIRECT=$(curl -sv --max-time 10 \
+  CODE_REDIRECT=$(curl -s -D - -o /dev/null --max-time 10 \
     -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
-    "$BASE$AUTH_SESSION" 2>&1)
+    "$BASE$AUTH_SESSION" 2>/dev/null)
   AUTH_CODE=$(echo "$CODE_REDIRECT" | grep -o "code=[^&]*" | head -1 | sed 's/code=//')
   RETURNED_STATE=$(echo "$CODE_REDIRECT" | grep -o "state=[^&\"]*" | head -1 | sed 's/state=//')
 fi
