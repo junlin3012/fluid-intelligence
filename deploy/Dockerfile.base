@@ -21,7 +21,8 @@ RUN cargo build --release --locked
 # Stage 2: mcp-auth-proxy binary
 FROM alpine:3.20 AS authproxy
 ADD https://github.com/sigbit/mcp-auth-proxy/releases/download/v2.5.4/mcp-auth-proxy-linux-amd64 /mcp-auth-proxy
-RUN chmod +x /mcp-auth-proxy
+RUN echo "d4433764543a65f0efc70d878a693f28b1eec517eb66a81ff131398b3a42b3c2  /mcp-auth-proxy" | sha256sum -c - && \
+    chmod +x /mcp-auth-proxy
 
 # Stage 3: Runtime — ContextForge base + all system deps + binaries
 FROM ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2

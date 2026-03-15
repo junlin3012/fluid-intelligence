@@ -783,6 +783,57 @@ else
 fi
 
 # =============================================
+# REVIEW ROUND 31: mcp-auth-proxy checksum
+# =============================================
+echo "--- R31: Supply chain security ---"
+
+DOCKERFILE_BASE="/Users/junlin/Projects/Shopify/fluid-intelligence/deploy/Dockerfile.base"
+if [ -f "$DOCKERFILE_BASE" ]; then
+  if grep -q 'mcp-auth-proxy' "$DOCKERFILE_BASE" && grep -q 'sha256sum' "$DOCKERFILE_BASE"; then
+    pass "mcp-auth-proxy binary has SHA-256 checksum verification"
+  else
+    fail "mcp-auth-proxy binary has SHA-256 checksum verification" "downloaded without integrity check"
+  fi
+else
+  pass "mcp-auth-proxy checksum (Dockerfile.base not found, skip)"
+fi
+
+# =============================================
+# REVIEW ROUND 32: Cloud Run env vars
+# =============================================
+echo "--- R32: Cloud Run config ---"
+
+CLOUDBUILD="/Users/junlin/Projects/Shopify/fluid-intelligence/deploy/cloudbuild.yaml"
+if grep -q 'PYTHONUNBUFFERED=1' "$CLOUDBUILD"; then
+  pass "PYTHONUNBUFFERED=1 set in Cloud Run env vars"
+else
+  fail "PYTHONUNBUFFERED=1 set in Cloud Run env vars" "Python log buffering can hide output"
+fi
+
+if grep -q 'DB_POOL_SIZE=' "$CLOUDBUILD"; then
+  pass "DB_POOL_SIZE explicitly set in Cloud Run env vars"
+else
+  fail "DB_POOL_SIZE explicitly set in Cloud Run env vars" "default 200 exceeds Cloud SQL db-f1-micro limit of 25"
+fi
+
+# =============================================
+# REVIEW ROUND 33: SSE casing consistency
+# =============================================
+echo "--- R33: Documentation consistency ---"
+
+PATTERNS="/Users/junlin/Projects/Shopify/fluid-intelligence/docs/agent-behavior/patterns.md"
+if [ -f "$PATTERNS" ]; then
+  LOWERCASE_SSE=$(grep -c '`sse`' "$PATTERNS" 2>/dev/null) || LOWERCASE_SSE=0
+  if [ "$LOWERCASE_SSE" -gt 0 ]; then
+    fail "patterns.md uses consistent SSE casing" "lowercase sse found — code uses uppercase SSE"
+  else
+    pass "patterns.md uses consistent SSE casing"
+  fi
+else
+  pass "patterns.md SSE casing (file not found, skip)"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""
