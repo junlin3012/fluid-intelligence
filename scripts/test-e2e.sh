@@ -214,7 +214,7 @@ echo "--- 4. MCP Protocol (root /mcp) ---"
 
 mcp_post() {
   local path="$1" body="$2"
-  # Use -s without -f so server error responses are captured (not silenced)
+  # Use -s only (no -f) so HTTP error response bodies are captured for diagnostics
   curl -s --max-time 15 -X POST \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \

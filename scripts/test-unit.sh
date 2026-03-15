@@ -661,6 +661,128 @@ else
 fi
 
 # =============================================
+# REVIEW ROUND 21: start_and_verify crash hint
+# =============================================
+echo "--- R21: start_and_verify crash diagnostics ---"
+
+CRASH_MSG=$(grep -A2 'crashed on startup' "$ENTRYPOINT")
+if echo "$CRASH_MSG" | grep -qi 'log\|stderr\|check\|above'; then
+  pass "start_and_verify crash message hints at where to look"
+else
+  fail "start_and_verify crash message hints at where to look" "no hint about checking container logs"
+fi
+
+# =============================================
+# REVIEW ROUND 21: FIRST_EXIT printed in monitor
+# =============================================
+echo "--- R21: Monitor prints FIRST_EXIT ---"
+
+MONITOR_SECTION=$(sed -n '/wait -n/,/exit 1$/p' "$ENTRYPOINT")
+if echo "$MONITOR_SECTION" | grep -q 'FIRST_EXIT'; then
+  # Check it's actually printed, not just captured
+  if echo "$MONITOR_SECTION" | grep -q 'echo.*FIRST_EXIT'; then
+    pass "Monitor section prints FIRST_EXIT code"
+  else
+    fail "Monitor section prints FIRST_EXIT code" "FIRST_EXIT captured but never echoed"
+  fi
+else
+  fail "Monitor section prints FIRST_EXIT code" "FIRST_EXIT not referenced in monitor"
+fi
+
+# =============================================
+# REVIEW ROUND 22: register_gateway FATAL includes context
+# =============================================
+echo "--- R22: register_gateway FATAL includes HTTP context ---"
+
+BOOTSTRAP="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh"
+REG_FATAL=$(grep 'FATAL.*Failed to register' "$BOOTSTRAP")
+if echo "$REG_FATAL" | grep -qE 'http_code|HTTP|body'; then
+  pass "register_gateway FATAL includes HTTP context"
+else
+  fail "register_gateway FATAL includes HTTP context" "FATAL message doesn't include last HTTP code or body"
+fi
+
+# =============================================
+# REVIEW ROUND 22: Virtual server failure is FATAL
+# =============================================
+echo "--- R22: Virtual server creation failure severity ---"
+
+VS_FAIL=$(grep -A1 'Virtual server creation failed' "$BOOTSTRAP")
+if echo "$VS_FAIL" | grep -qi 'FATAL'; then
+  pass "Virtual server creation failure is FATAL"
+else
+  fail "Virtual server creation failure is FATAL" "tagged as WARNING but should be FATAL — gateway non-functional without it"
+fi
+
+# =============================================
+# REVIEW ROUND 23: Predictable temp files
+# =============================================
+echo "--- R23: Temp file safety ---"
+
+# entrypoint.sh should use mktemp or $$ for temp files
+ENTRYPOINT_TEMPS=$(grep -n '/tmp/.*\.log' "$ENTRYPOINT" | grep -v 'rm -f' | head -5)
+if echo "$ENTRYPOINT_TEMPS" | grep -qE 'mktemp|\$\$'; then
+  pass "entrypoint.sh temp files use mktemp or PID suffix"
+else
+  fail "entrypoint.sh temp files use mktemp or PID suffix" "predictable temp file names — symlink attack vector"
+fi
+
+# =============================================
+# REVIEW ROUND 24: mcp_post hides error responses
+# =============================================
+echo "--- R24: mcp_post error visibility ---"
+
+E2E="/Users/junlin/Projects/Shopify/fluid-intelligence/scripts/test-e2e.sh"
+MCP_POST_DEF=$(sed -n '/^mcp_post()/,/^}/p' "$E2E")
+# Check curl command line (not comments) for -sf or -f flags
+if echo "$MCP_POST_DEF" | grep -v '^[[:space:]]*#' | grep -qE 'curl.*-[a-z]*f'; then
+  fail "mcp_post does not use -f flag" "curl -f hides HTTP error response bodies"
+else
+  pass "mcp_post does not use -f flag"
+fi
+
+# =============================================
+# REVIEW ROUND 24: E2E section numbering
+# =============================================
+echo "--- R24: E2E section numbering ---"
+
+SECTION_3B_COUNT=$(grep -c 'echo.*3b\.' "$E2E" 2>/dev/null) || SECTION_3B_COUNT=0
+if [ "$SECTION_3B_COUNT" -le 1 ]; then
+  pass "E2E has no duplicate section numbers"
+else
+  fail "E2E has no duplicate section numbers" "section '3b' appears $SECTION_3B_COUNT times"
+fi
+
+# =============================================
+# REVIEW ROUND 28: Tool discovery stabilization
+# =============================================
+echo "--- R28: Tool discovery waits for stabilization ---"
+
+TOOL_DISCOVERY=$(sed -n '/Verify tools discovered/,/virtual server/p' "$BOOTSTRAP")
+if echo "$TOOL_DISCOVERY" | grep -qE 'stable|poll|sleep|prev.*count|for.*seq'; then
+  pass "Tool discovery waits for count to stabilize"
+else
+  fail "Tool discovery waits for count to stabilize" "tools queried once immediately — race with async discovery"
+fi
+
+# =============================================
+# REVIEW ROUND 30: patterns.md JWT expiry
+# =============================================
+echo "--- R30: Documentation accuracy ---"
+
+PATTERNS="/Users/junlin/Projects/Shopify/fluid-intelligence/docs/agent-behavior/patterns.md"
+if [ -f "$PATTERNS" ]; then
+  JWT_DOC=$(grep -i 'short.*lived.*min' "$PATTERNS" 2>/dev/null || true)
+  if echo "$JWT_DOC" | grep -q '5 min'; then
+    fail "patterns.md JWT expiry matches code" "doc says 5 min but bootstrap.sh uses --exp 10"
+  else
+    pass "patterns.md JWT expiry matches code"
+  fi
+else
+  pass "patterns.md JWT expiry matches code (file not found, skip)"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

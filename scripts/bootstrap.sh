@@ -80,7 +80,7 @@ register_gateway() {
     sleep "$attempt"
   done
 
-  echo "[bootstrap] FATAL: Failed to register $name after $max_attempts attempts"
+  echo "[bootstrap] FATAL: Failed to register $name after $max_attempts attempts (last HTTP $http_code): $(echo "$body" | head -c 200)"
   return 1
 }
 
@@ -143,11 +143,23 @@ done
 echo "[bootstrap] Registering google-sheets..."
 register_gateway "google-sheets" "http://127.0.0.1:8004/sse" "SSE"
 
-# Verify tools discovered
-echo "[bootstrap] All 3 backends registered"
-TOOL_COUNT=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
-[[ "$TOOL_COUNT" =~ ^[0-9]+$ ]] || TOOL_COUNT=0
-echo "[bootstrap] $TOOL_COUNT tools in catalog"
+# Verify tools discovered — poll until count stabilizes (async discovery race)
+echo "[bootstrap] All 3 backends registered, waiting for tool discovery..."
+prev_count=-1
+stable=0
+for i in $(seq 1 30); do
+  TOOL_COUNT=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
+  [[ "$TOOL_COUNT" =~ ^[0-9]+$ ]] || TOOL_COUNT=0
+  if [ "$TOOL_COUNT" -eq "$prev_count" ] && [ "$TOOL_COUNT" -gt 0 ]; then
+    stable=$((stable + 1))
+    [ "$stable" -ge 2 ] && break
+  else
+    stable=0
+  fi
+  prev_count=$TOOL_COUNT
+  sleep 2
+done
+echo "[bootstrap] $TOOL_COUNT tools in catalog (stabilized after $((i * 2))s)"
 if [ "$TOOL_COUNT" -eq 0 ]; then
   echo "[bootstrap] WARNING: Zero tools discovered — check backend registrations above"
 fi
@@ -192,8 +204,9 @@ if [ "$vs_code" -ge 200 ] && [ "$vs_code" -lt 300 ]; then
   echo "[bootstrap] MCP endpoint: /servers/$VS_ID/mcp"
   echo "[bootstrap] SSE endpoint: /servers/$VS_ID/sse"
 else
-  echo "[bootstrap] WARNING: Virtual server creation failed (HTTP $vs_code): $(echo "$vs_body" | head -c 200)"
+  echo "[bootstrap] FATAL: Virtual server creation failed (HTTP $vs_code): $(echo "$vs_body" | head -c 200)"
   echo "[bootstrap] MCP tools/list will be empty — clients cannot discover tools"
+  exit 1
 fi
 
 # --- Debug dump ---

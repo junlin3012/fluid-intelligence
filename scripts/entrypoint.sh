@@ -103,6 +103,7 @@ start_and_verify() {
   sleep 2
   if ! kill -0 "$pid" 2>/dev/null; then
     echo "[fluid-intelligence] FATAL: $name (PID $pid) crashed on startup"
+    echo "[fluid-intelligence]   Check container logs above for $name stderr output"
     # Kill anything else we started
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
@@ -226,6 +227,8 @@ set +e
 wait -n "$APOLLO_PID" "$CONTEXTFORGE_PID" "$TRANSLATE_DEVMCP_PID" "$TRANSLATE_SHEETS_PID" "$AUTHPROXY_PID"
 FIRST_EXIT=$?
 set -e
+
+echo "[fluid-intelligence] FATAL: A process exited unexpectedly (first exit code: $FIRST_EXIT)"
 
 for name_pid in "Apollo-bridge:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$TRANSLATE_DEVMCP_PID" "sheets:$TRANSLATE_SHEETS_PID" "auth-proxy:$AUTHPROXY_PID"; do
   name="${name_pid%%:*}"
