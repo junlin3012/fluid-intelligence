@@ -19,7 +19,7 @@ Six debugging dimensions were brainstormed, each requiring a different investiga
 | **D5: Validation Completeness** | Every input validated? Every code path tested? Any bypass routes? |
 | **D6: Observability Gaps** | Can every failure be diagnosed from logs alone? |
 
-## Fixes Applied (14 fixes)
+## Fixes Applied (16 fixes)
 
 | Dimension | Severity | Issue | Fix |
 |-----------|----------|-------|-----|
@@ -37,6 +37,8 @@ Six debugging dimensions were brainstormed, each requiring a different investiga
 | **D5** | Medium | PID file contents not validated as numeric — corrupted file triggers false crash detection | Added `^[0-9]+$` check on all 3 PID reads |
 | **D5** | Medium | JWT token format not validated — Python warnings in stdout produce garbage token | Added header.payload.signature regex check |
 | **D5** | Medium | Virtual server deletion assumes single ID — multiple stale entries leave orphans | Changed to `while read` loop (matches gateway pattern) |
+| **D3** | **High** | Empty `encoded_pw` silently produces password-less DATABASE_URL (trust auth bypass) | Added empty-result guard with FATAL exit |
+| **D3** | Medium | Shopify `client_id`/`client_secret` not URL-encoded in form POST body | Switched from raw `printf %s` to `--data-urlencode` |
 
 ## Stale Agent Findings (triaged from previous session)
 
@@ -79,9 +81,9 @@ Cloud Run startup probe: `failureThreshold=48 × periodSeconds=5 = 240s`
 | Metric | Value |
 |--------|-------|
 | Debugging dimensions | 6 |
-| Fixes applied | 14 |
-| Unit tests (total) | 130 |
-| New tests this batch | 17 |
+| Fixes applied | 16 |
+| Unit tests (total) | 132 |
+| New tests this batch | 19 |
 | Stale agents triaged | 17 |
 | Genuine findings from stale agents | 6 |
 | False positives / already fixed | 11 |
@@ -92,7 +94,7 @@ Cloud Run startup probe: `failureThreshold=48 × periodSeconds=5 = 240s`
 |--------|-------|
 | Total review rounds | 51+ |
 | Total debugging dimensions | 6 |
-| Total code fixes | 52+ |
-| Total unit tests | 130 |
+| Total code fixes | 54+ |
+| Total unit tests | 132 |
 | E2E tests | 21 |
 | Files modified | 18+ |
