@@ -1408,6 +1408,19 @@ else
 fi
 
 # =============================================
+# B16-R1: Comment cross-reference accuracy
+# =============================================
+echo "--- B16-R1: Comment accuracy ---"
+
+ENTRYPOINT="$REPO_ROOT/scripts/entrypoint.sh"
+# Comments referencing other files should not point to nonexistent sections
+if grep -q 'see CLAUDE.md' "$ENTRYPOINT"; then
+  fail "No stale cross-references in entrypoint.sh comments" "references CLAUDE.md for SDL instructions but CLAUDE.md has none"
+else
+  pass "No stale cross-references in entrypoint.sh comments"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

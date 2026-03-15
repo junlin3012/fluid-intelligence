@@ -128,7 +128,7 @@ done
 : "${SHOPIFY_ACCESS_TOKEN:?Token loop exited without setting SHOPIFY_ACCESS_TOKEN}"
 
 # Shopify schema (SDL) is baked into the image at /app/shopify-schema.graphql
-# To update: re-run introspection and convert to SDL (see CLAUDE.md)
+# To update: re-run introspection against Shopify Admin API and rebuild Dockerfile.base
 
 # --- Helper: start a process with early crash detection ---
 start_and_verify() {
