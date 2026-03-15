@@ -98,7 +98,7 @@ for attempt in 1 2 3 4 5; do
     exit 1
   fi
   echo "[fluid-intelligence] Token attempt $attempt failed (HTTP $http_code)"
-  sleep $((attempt * 2))
+  sleep "$((attempt * 2))"
 done
 
 # Shopify schema (SDL) is baked into the image at /app/shopify-schema.graphql
@@ -170,7 +170,7 @@ start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 # --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
 for i in $(seq 1 180); do
-  if curl -sf --connect-timeout 2 --max-time 5 http://127.0.0.1:${CONTEXTFORGE_PORT}/health > /dev/null 2>&1; then
+  if curl -sf --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CONTEXTFORGE_PORT}/health" > /dev/null 2>&1; then
     echo "[fluid-intelligence] ContextForge ready after ${i}s [+$(elapsed)s]"
     break
   fi
@@ -202,7 +202,7 @@ mcp-auth-proxy \
   --password "$AUTH_PASSWORD" \
   --no-auto-tls \
   --data-path /app/data \
-  -- http://127.0.0.1:${CONTEXTFORGE_PORT} &
+  -- "http://127.0.0.1:${CONTEXTFORGE_PORT}" &
 AUTHPROXY_PID=$!
 PIDS+=("$AUTHPROXY_PID")
 start_and_verify "auth-proxy" "$AUTHPROXY_PID"
