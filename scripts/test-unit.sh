@@ -927,12 +927,14 @@ fi
 # =============================================
 echo "--- R49: curl patterns ---"
 
-# test-e2e.sh should not use 2>&1 on curl calls that capture JSON
-E2E_CURL_2REDIR=$(grep -c 'curl.*2>&1' $REPO_ROOT/scripts/test-e2e.sh) || E2E_CURL_2REDIR=0
+# test-e2e.sh should not use 2>&1 on curl output capture lines
+# curl commands span multiple lines, so check for 2>&1 on lines that end curl blocks
+# (exclude jq/echo piped checks which use > /dev/null 2>&1 harmlessly)
+E2E_CURL_2REDIR=$(grep '2>&1)' "$REPO_ROOT/scripts/test-e2e.sh" | grep -cv 'jq\|echo' || true)
 if [ "$E2E_CURL_2REDIR" -eq 0 ]; then
   pass "test-e2e.sh no curl 2>&1 contamination"
 else
-  fail "test-e2e.sh no curl 2>&1 contamination" "found $E2E_CURL_2REDIR instances"
+  fail "test-e2e.sh no curl 2>&1 contamination" "found $E2E_CURL_2REDIR instances (stderr contaminates HTTP code capture)"
 fi
 
 # bootstrap.sh all curl calls have --connect-timeout

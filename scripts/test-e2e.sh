@@ -202,7 +202,7 @@ INVALID_RESP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
   -H "Authorization: Bearer invalid-token-12345" \
   -H "Accept: application/json" \
   -X POST -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
-  "$BASE/mcp" 2>&1)
+  "$BASE/mcp" 2>/dev/null)
 if [ "$INVALID_RESP" = "401" ]; then
   result "PASS" "Invalid token rejected (401)"
 else
@@ -213,7 +213,7 @@ fi
 NO_TOKEN_RESP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
   -H "Accept: application/json" \
   -X POST -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
-  "$BASE/mcp" 2>&1)
+  "$BASE/mcp" 2>/dev/null)
 if [ "$NO_TOKEN_RESP" = "401" ]; then
   result "PASS" "No-token request rejected (401)"
 else
