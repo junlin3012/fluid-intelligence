@@ -3,7 +3,7 @@ mutation CreateDiscountCode(
   $code: String!
   $startsAt: DateTime!
   $endsAt: DateTime
-  $percentage: Float
+  $percentage: Float!
   $appliesOncePerCustomer: Boolean = true
 ) {
   discountCodeBasicCreate(
