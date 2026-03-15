@@ -15,12 +15,16 @@ Fluid Intelligence is a multi-process container running on Google Cloud Run. One
 Cloud Run container (:8080 exposed)
 ├── tini (PID 1, init process)
 └── entrypoint.sh (orchestrator)
-    ├── 1. Apollo MCP Server (Rust)        :8000  — Shopify GraphQL ops
+    ├── 1. Apollo bridge (Rust→stdio→SSE)   :8000  — Shopify GraphQL ops
     ├── 2. ContextForge (Python/FastAPI)    :4444  — MCP gateway core
-    ├── 3. dev-mcp bridge (Python+Node)     :8003  — Shopify docs (stdio→SSE)
-    ├── 4. google-sheets bridge (Python)    :8004  — Google Sheets (stdio→SSE)
+    ├── 3. dev-mcp bridge (Node→stdio→SSE)  :8003  — Shopify docs
+    ├── 4. sheets bridge (Python→stdio→SSE) :8004  — Google Sheets
     └── 5. mcp-auth-proxy (Go)             :8080  — OAuth 2.1 front door
 ```
+
+All three backends (Apollo, dev-mcp, sheets) run as stdio processes bridged to SSE
+via `mcpgateway.translate`. This is required because ContextForge's MCP client has
+a bug with the `streamable_http` transport.
 
 Traffic flow: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backends`
 
@@ -86,11 +90,11 @@ Total cold start: ~15-20s (with `--cpu-boost`)
 - This is SAFE as long as you don't need the CLI script
 
 ### 2. Apollo skips all GraphQL mutation operations
-- All 23 `.graphql` files get "Skipping mutation operation X" warnings
+- All mutation `.graphql` files get "Skipping mutation operation X" warnings
 - Apollo v1.9.0 validates operations against the schema at load time
-- Root cause: GraphQL operations use deprecated fields/inputs
-- Impact: Apollo starts but exposes no Shopify tools
-- Fix needed: Update all GraphQL operations to use current schema
+- Root cause: GraphQL operations may use deprecated fields/inputs
+- Impact: Apollo exposes only query tools, no mutations
+- Fix needed: Update mutation operations to use current Shopify 2026-01 schema
 
 ### 3. Cloud Run PORT is immutable
 - Cloud Run injects `PORT=8080` — you cannot override it
