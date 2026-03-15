@@ -1,5 +1,6 @@
 """Shopify OAuth service — handles app installation and token exchange."""
 
+import html
 import logging
 import urllib.parse
 
@@ -51,7 +52,8 @@ def install(request: Request):
     # Shopify loads application_url in an iframe after install.
     # When there's no HMAC, show the app home page instead of 400.
     if not received_hmac:
-        return HTMLResponse(content=_app_home_html(shop), status_code=200)
+        safe_shop = shop if validate_shop_hostname(shop) else ""
+        return HTMLResponse(content=_app_home_html(safe_shop), status_code=200)
 
     if not validate_shop_hostname(shop):
         return Response("Invalid shop hostname", status_code=400)
@@ -277,7 +279,7 @@ _BASE_STYLE = """
 
 
 def _success_html(shop: str) -> str:
-    safe_shop = shop.replace("<", "&lt;").replace(">", "&gt;")
+    safe_shop = html.escape(shop)
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -301,7 +303,7 @@ def _success_html(shop: str) -> str:
 
 
 def _app_home_html(shop: str) -> str:
-    safe_shop = shop.replace("<", "&lt;").replace(">", "&gt;") if shop else ""
+    safe_shop = html.escape(shop) if shop else ""
     shop_line = f'<div class="shop-name"><span class="status-dot"></span>{safe_shop}</div>' if safe_shop else ""
     return f"""<!DOCTYPE html>
 <html lang="en"><head>

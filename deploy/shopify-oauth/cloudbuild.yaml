@@ -19,7 +19,7 @@ steps:
       - '--cpu=1'
       - '--add-cloudsql-instances=junlinleather-mcp:asia-southeast1:contextforge'
       - '--set-secrets=SHOPIFY_CLIENT_ID=shopify-client-id:latest,SHOPIFY_CLIENT_SECRET=shopify-client-secret:latest,DB_PASSWORD=db-password:latest,SHOPIFY_TOKEN_ENCRYPTION_KEY=shopify-token-encryption-key:latest'
-      - '--set-env-vars=DB_USER=contextforge,DB_NAME=contextforge,SHOPIFY_API_VERSION=2026-01,PYTHONUNBUFFERED=1'
+      - '--set-env-vars=DB_USER=contextforge,DB_NAME=contextforge,SHOPIFY_API_VERSION=2026-01,CALLBACK_URL=https://shopify-oauth-1056128102929.asia-southeast1.run.app/auth/callback,PYTHONUNBUFFERED=1'
       - '--allow-unauthenticated'
 
 substitutions:

@@ -1,6 +1,4 @@
 # tests/shopify_oauth/test_main.py
-import hashlib
-import hmac
 import time
 import os
 import base64
@@ -16,13 +14,10 @@ os.environ.setdefault("CALLBACK_URL", "http://localhost/auth/callback")
 os.environ.setdefault("SHOPIFY_SCOPES", "read_products")
 
 from services.shopify_oauth.main import app
+from services.shopify_oauth.security import compute_hmac
 
 # Use https://testserver so Secure cookies are included in test requests
 client = TestClient(app, base_url="https://testserver")
-
-def make_hmac(params: dict, secret: str = "test_secret") -> str:
-    message = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-    return hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
 
 def test_health():
     r = client.get("/health")
@@ -31,7 +26,7 @@ def test_health():
 
 def test_install_redirects_to_shopify():
     params = {"shop": "test-store.myshopify.com", "timestamp": str(int(time.time()))}
-    params["hmac"] = make_hmac(params)
+    params["hmac"] = compute_hmac(params, "test_secret")
     r = client.get("/auth/install", params=params, follow_redirects=False)
     assert r.status_code == 302
     assert "admin/oauth/authorize" in r.headers["location"]
@@ -52,7 +47,7 @@ def test_install_shows_app_home_no_params():
 
 def test_install_rejects_invalid_shop():
     params = {"shop": "evil.com", "timestamp": str(int(time.time()))}
-    params["hmac"] = make_hmac(params)
+    params["hmac"] = compute_hmac(params, "test_secret")
     r = client.get("/auth/install", params=params)
     assert r.status_code == 400
 
@@ -63,7 +58,7 @@ def test_install_rejects_bad_hmac():
 
 def test_install_rejects_stale_timestamp():
     params = {"shop": "test.myshopify.com", "timestamp": str(int(time.time()) - 600)}
-    params["hmac"] = make_hmac(params)
+    params["hmac"] = compute_hmac(params, "test_secret")
     r = client.get("/auth/install", params=params)
     assert r.status_code == 401
 
@@ -78,7 +73,7 @@ def test_callback_exchanges_token(mock_shop_id, mock_webhooks, mock_store, mock_
     with TestClient(app, base_url="https://testserver") as session_client:
         # First do install to get nonce cookie (cookie jar persists on session_client)
         params = {"shop": "test-store.myshopify.com", "timestamp": str(int(time.time()))}
-        params["hmac"] = make_hmac(params)
+        params["hmac"] = compute_hmac(params, "test_secret")
         install_r = session_client.get("/auth/install", params=params, follow_redirects=False)
         assert install_r.status_code == 302
 
@@ -89,7 +84,7 @@ def test_callback_exchanges_token(mock_shop_id, mock_webhooks, mock_store, mock_
 
         # Now hit callback — cookies persist on session_client automatically
         cb_params = {"shop": "test-store.myshopify.com", "code": "auth_code_123", "state": state, "timestamp": str(int(time.time()))}
-        cb_params["hmac"] = make_hmac(cb_params)
+        cb_params["hmac"] = compute_hmac(cb_params, "test_secret")
         r = session_client.get("/auth/callback", params=cb_params)
         assert r.status_code == 200
         assert "Connected Successfully" in r.text

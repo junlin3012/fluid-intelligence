@@ -25,7 +25,7 @@ cleanup() {
     wait "$pid" 2>/dev/null || true
   done
   # Clean up temp files (only entrypoint's own — bootstrap uses its own $$ for JWT/curl temp files)
-  rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log
+  rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log /tmp/db-token-err-$$.log
   rm -f /tmp/apollo.pid /tmp/devmcp.pid /tmp/sheets.pid
   exit 143  # 128 + 15 (SIGTERM)
 }
@@ -93,6 +93,7 @@ DB_TOKEN=$(/app/.venv/bin/python3 -c "
 import os, sys
 try:
     import psycopg2
+    from services.shopify_oauth.crypto import decrypt_token
     conn = psycopg2.connect(
         dbname=os.environ.get('DB_NAME', 'contextforge'),
         user=os.environ.get('DB_USER', 'contextforge'),
@@ -104,12 +105,7 @@ try:
                 (os.environ.get('SHOPIFY_STORE', ''), 'active'))
     row = cur.fetchone()
     if row and row[0]:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        import base64
-        key = base64.b64decode(os.environ.get('SHOPIFY_TOKEN_ENCRYPTION_KEY', ''))
-        data = base64.b64decode(row[0])
-        nonce, ct = data[:12], data[12:]
-        print(AESGCM(key).decrypt(nonce, ct, None).decode())
+        print(decrypt_token(row[0], os.environ.get('SHOPIFY_TOKEN_ENCRYPTION_KEY', '')))
     conn.close()
 except Exception as e:
     print(f'DB_TOKEN_ERROR: {e}', file=sys.stderr)
