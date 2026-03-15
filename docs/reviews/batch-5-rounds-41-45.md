@@ -73,6 +73,9 @@ These require design decisions, upstream changes, or infrastructure work:
 
 | Priority | Issue |
 |----------|-------|
+| High | Bridge PID liveness in bootstrap — export PIDs or write to `/tmp/*.pid` so bootstrap can detect crashed bridges |
+| High | HTTP-level health check for auth-proxy — `kill -0` only proves process exists, not that upstream is reachable |
+| High | Cloud Run liveness probe at HTTP level — ContextForge crash after bootstrap leaves auth-proxy serving 502s |
 | High | Pin `@shopify/dev-mcp` and `mcp-google-sheets` versions, install at build time |
 | High | Pin `uv` version with SHA-256 checksum |
 | High | Set `AUTH_REQUIRED=true` on ContextForge for defense-in-depth |
