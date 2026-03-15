@@ -55,6 +55,16 @@ if [[ -n "${EXTERNAL_URL:-}" ]] && ! [[ "$EXTERNAL_URL" =~ ^[a-zA-Z0-9][a-zA-Z0-
   exit 1
 fi
 
+# Validate DB_USER and DB_NAME (they're interpolated into DATABASE_URL — special chars corrupt the URI)
+if [[ -n "${DB_USER:-}" ]] && ! [[ "${DB_USER}" =~ ^[a-zA-Z0-9_]+$ ]]; then
+  echo "[fluid-intelligence] FATAL: DB_USER must be alphanumeric/underscore, got: $DB_USER"
+  exit 1
+fi
+if [[ -n "${DB_NAME:-}" ]] && ! [[ "${DB_NAME}" =~ ^[a-zA-Z0-9_]+$ ]]; then
+  echo "[fluid-intelligence] FATAL: DB_NAME must be alphanumeric/underscore, got: $DB_NAME"
+  exit 1
+fi
+
 # --- Env var wiring ---
 # URL-encode DB_PASSWORD to handle special chars (@, ?, /, %) that break connection strings
 encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))")

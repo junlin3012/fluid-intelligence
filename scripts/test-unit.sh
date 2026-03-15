@@ -1088,6 +1088,35 @@ else
   fail "entrypoint.sh validates GOOGLE_OAUTH env vars" "missing required var check"
 fi
 
+# DB_USER and DB_NAME validated as alphanumeric before DATABASE_URL interpolation
+if grep -q 'DB_USER.*alphanumeric\|DB_USER.*\[a-zA-Z0-9_\]' scripts/entrypoint.sh; then
+  pass "entrypoint.sh validates DB_USER format"
+else
+  fail "entrypoint.sh validates DB_USER format" "DB_USER interpolated into DATABASE_URL without validation"
+fi
+
+# PID file reads validated as numeric before kill
+PID_NUMERIC_CHECKS=$(grep -c 'BRIDGE_PID.*\[0-9\]' scripts/bootstrap.sh) || PID_NUMERIC_CHECKS=0
+if [ "$PID_NUMERIC_CHECKS" -ge 3 ]; then
+  pass "bootstrap.sh validates PID file contents as numeric ($PID_NUMERIC_CHECKS checks)"
+else
+  fail "bootstrap.sh validates PID file contents as numeric" "only $PID_NUMERIC_CHECKS checks (need 3)"
+fi
+
+# JWT token format validated after generation
+if grep -q 'JWT.*invalid format\|TOKEN.*header\.payload\.signature' scripts/bootstrap.sh; then
+  pass "bootstrap.sh validates JWT token format"
+else
+  fail "bootstrap.sh validates JWT token format" "no format check after JWT generation"
+fi
+
+# Virtual server deletion handles multiple IDs (while read loop)
+if grep -A5 'existing_vs' scripts/bootstrap.sh | grep -q 'while read'; then
+  pass "bootstrap.sh handles multiple stale virtual server IDs"
+else
+  fail "bootstrap.sh handles multiple stale virtual server IDs" "single-value assumption"
+fi
+
 # =============================================
 # MIRROR-SHINE D6: Observability gaps
 # =============================================

@@ -38,6 +38,12 @@ if [ -z "$TOKEN" ]; then
   exit 1
 fi
 rm -f /tmp/jwt-primary-err-$$.log /tmp/jwt-fallback-err-$$.log
+# Validate JWT format (header.payload.signature) — catch Python warnings/garbage in stdout
+if ! [[ "$TOKEN" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+  echo "[bootstrap] FATAL: JWT token has invalid format (possible Python warning in stdout)"
+  echo "[bootstrap]   Token starts with: $(echo "$TOKEN" | head -c 50)"
+  exit 1
+fi
 echo "[bootstrap] JWT token generated"
 
 CF="http://127.0.0.1:${CONTEXTFORGE_PORT:-4444}"
@@ -118,7 +124,7 @@ for i in $(seq 1 60); do
   # Fast-fail: check if bridge process is still alive (PID file from entrypoint)
   if [ -f /tmp/apollo.pid ]; then
     BRIDGE_PID=$(cat /tmp/apollo.pid 2>/dev/null)
-    if [ -n "$BRIDGE_PID" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+    if [ -n "$BRIDGE_PID" ] && [[ "$BRIDGE_PID" =~ ^[0-9]+$ ]] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
       echo "[bootstrap] FATAL: Apollo bridge process (PID $BRIDGE_PID) crashed"
       exit 1
     fi
@@ -139,7 +145,7 @@ echo "[bootstrap] Waiting for dev-mcp bridge..."
 for i in $(seq 1 90); do
   if [ -f /tmp/devmcp.pid ]; then
     BRIDGE_PID=$(cat /tmp/devmcp.pid 2>/dev/null)
-    if [ -n "$BRIDGE_PID" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+    if [ -n "$BRIDGE_PID" ] && [[ "$BRIDGE_PID" =~ ^[0-9]+$ ]] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
       echo "[bootstrap] FATAL: dev-mcp bridge process (PID $BRIDGE_PID) crashed"
       exit 1
     fi
@@ -158,7 +164,7 @@ echo "[bootstrap] Waiting for google-sheets bridge..."
 for i in $(seq 1 60); do
   if [ -f /tmp/sheets.pid ]; then
     BRIDGE_PID=$(cat /tmp/sheets.pid 2>/dev/null)
-    if [ -n "$BRIDGE_PID" ] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+    if [ -n "$BRIDGE_PID" ] && [[ "$BRIDGE_PID" =~ ^[0-9]+$ ]] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
       echo "[bootstrap] FATAL: google-sheets bridge process (PID $BRIDGE_PID) crashed"
       exit 1
     fi
@@ -198,17 +204,20 @@ fi
 # Without a virtual server, tools/list via MCP returns empty.
 echo "[bootstrap] Creating virtual server..."
 
-# Delete existing virtual server (stale from previous deploy)
-existing_vs=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" \
+# Delete existing virtual servers (stale from previous deploy — could be multiple)
+existing_vs_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" \
   "$CF/servers" 2>/dev/null | \
   jq -r '.[] | select(.name=="fluid-intelligence") | .id' 2>/dev/null) || true
-if [ -n "$existing_vs" ] && [ "$existing_vs" != "null" ]; then
-  echo "[bootstrap] Deleting stale virtual server (id=$existing_vs)"
-  vs_del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
-    -H "Authorization: Bearer $TOKEN" "$CF/servers/$existing_vs" 2>/dev/null) || vs_del_code=0
-  if [ "$vs_del_code" -ne 200 ] && [ "$vs_del_code" -ne 204 ] && [ "$vs_del_code" -ne 404 ]; then
-    echo "[bootstrap] WARNING: DELETE virtual server returned HTTP $vs_del_code"
-  fi
+if [ -n "$existing_vs_ids" ]; then
+  echo "$existing_vs_ids" | while read -r vs_id; do
+    [ -z "$vs_id" ] || [ "$vs_id" = "null" ] && continue
+    echo "[bootstrap] Deleting stale virtual server (id=$vs_id)"
+    vs_del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
+      -H "Authorization: Bearer $TOKEN" "$CF/servers/$vs_id" 2>/dev/null) || vs_del_code=0
+    if [ "$vs_del_code" -ne 200 ] && [ "$vs_del_code" -ne 204 ] && [ "$vs_del_code" -ne 404 ]; then
+      echo "[bootstrap] WARNING: DELETE virtual server $vs_id returned HTTP $vs_del_code"
+    fi
+  done
 fi
 
 # Get all tool IDs from the catalog
