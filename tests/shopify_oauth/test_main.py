@@ -106,8 +106,9 @@ def test_callback_exchanges_token(mock_shop_id, mock_webhooks, mock_store, mock_
         mock_exchange.assert_called_once_with("test-store.myshopify.com", "auth_code_123")
         mock_store.assert_called_once_with("test-store.myshopify.com", "shpat_test_token", "read_products")
 
+@patch("services.shopify_oauth.main.store_installation")
 @patch("services.shopify_oauth.main.exchange_code_for_token")
-def test_callback_returns_502_on_token_exchange_failure(mock_exchange):
+def test_callback_returns_502_on_token_exchange_failure(mock_exchange, mock_store):
     """When Shopify token exchange fails, callback returns 502."""
     mock_exchange.return_value = ("", "")
 
@@ -126,3 +127,4 @@ def test_callback_returns_502_on_token_exchange_failure(mock_exchange):
         r = session_client.get("/auth/callback", params=cb_params)
         assert r.status_code == 502
         assert "Token exchange failed" in r.text
+        mock_store.assert_not_called()
