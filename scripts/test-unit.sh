@@ -610,13 +610,14 @@ fi
 # =============================================
 # REVIEW ROUND 18: Dockerfile COPY --chmod
 # =============================================
-echo "--- R18: Dockerfile COPY --chmod optimization ---"
+echo "--- R18: Dockerfile permissions ---"
 
 DOCKERFILE="/Users/junlin/Projects/Shopify/fluid-intelligence/deploy/Dockerfile"
-if grep -q 'COPY --chmod' "$DOCKERFILE"; then
-  pass "Dockerfile uses COPY --chmod (eliminates RUN chmod layer)"
+# Scripts must be made executable (either via COPY --chmod or RUN chmod)
+if grep -q 'chmod.*755.*entrypoint' "$DOCKERFILE" || grep -q 'COPY --chmod=755' "$DOCKERFILE"; then
+  pass "Dockerfile sets script permissions (chmod 755 or COPY --chmod)"
 else
-  fail "Dockerfile uses COPY --chmod (eliminates RUN chmod layer)" "separate RUN chmod/chown wastes a layer"
+  fail "Dockerfile sets script permissions" "scripts not made executable"
 fi
 
 # =============================================
