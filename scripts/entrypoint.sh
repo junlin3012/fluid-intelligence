@@ -24,8 +24,8 @@ cleanup() {
   for pid in "${PIDS[@]}"; do
     wait "$pid" 2>/dev/null || true
   done
-  # Clean up temp and PID files
-  rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log /tmp/jwt-primary-err-$$.log /tmp/jwt-fallback-err-$$.log
+  # Clean up temp files (only entrypoint's own — bootstrap uses its own $$ for JWT/curl temp files)
+  rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log
   rm -f /tmp/apollo.pid /tmp/devmcp.pid /tmp/sheets.pid
   exit 143  # 128 + 15 (SIGTERM)
 }

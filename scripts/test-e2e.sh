@@ -34,11 +34,14 @@ result() {
   TOTAL=$((TOTAL + 1))
   if [ "$1" = "PASS" ]; then
     PASSED=$((PASSED + 1))
-    echo "  ✅ $2"
+    echo "  PASS: $2"
+  elif [ "$1" = "WARN" ]; then
+    PASSED=$((PASSED + 1))
+    echo "  WARN: $2"
   else
     FAILED=$((FAILED + 1))
-    echo "  ❌ $2: $3"
-    FAILURES="${FAILURES}\n  - $2: $3"
+    echo "  FAIL: $2: ${3:-no details}"
+    FAILURES="${FAILURES}\n  - $2: ${3:-no details}"
   fi
 }
 

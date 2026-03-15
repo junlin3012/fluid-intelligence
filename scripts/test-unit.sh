@@ -454,6 +454,7 @@ check_endcursor "$REPO_ROOT/graphql/fulfillments/CreateFulfillment.graphql" "Cre
 check_endcursor "$REPO_ROOT/graphql/products/CreateProduct.graphql" "CreateProduct"
 check_endcursor "$REPO_ROOT/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
 check_endcursor "$REPO_ROOT/graphql/inventory/GetInventoryLevels.graphql" "GetInventoryLevels"
+check_endcursor "$REPO_ROOT/graphql/customers/GetCustomers.graphql" "GetCustomers"
 
 # =============================================
 # REVIEW ROUND 6: CreateProduct wrong variant type
@@ -1282,6 +1283,33 @@ if grep -B3 'CF/servers.*2>' scripts/bootstrap.sh | grep -q 'vs_curl_err'; then
   pass "POST /servers captures curl stderr for diagnostics"
 else
   fail "POST /servers captures curl stderr for diagnostics" "curl errors lost with 2>/dev/null"
+fi
+
+# =============================================
+# B9: GraphQL and E2E fixes
+# =============================================
+echo "--- B9: GraphQL and E2E ---"
+
+# GetCustomers must have endCursor (same pattern as other connection queries)
+if grep -q 'endCursor' "$REPO_ROOT/graphql/customers/GetCustomers.graphql"; then
+  pass "GetCustomers.graphql has endCursor in pageInfo"
+else
+  fail "GetCustomers.graphql has endCursor in pageInfo" "pagination broken without endCursor"
+fi
+
+# E2E result() function should handle WARN status (not crash on unbound $3)
+if grep -q '"WARN"' "$REPO_ROOT/scripts/test-e2e.sh" && grep -A1 'WARN' "$REPO_ROOT/scripts/test-e2e.sh" | grep -q 'WARN:'; then
+  pass "E2E result() handles WARN status"
+else
+  fail "E2E result() handles WARN status" "WARN path crashes under set -u (unbound \$3)"
+fi
+
+# B9-R9: Cleanup trap should NOT reference bootstrap's temp files (different $$)
+echo "--- B9-R9: Cleanup trap PID correctness ---"
+if grep -A5 'cleanup()' scripts/entrypoint.sh | grep -q 'jwt-primary-err'; then
+  fail "Cleanup trap references only entrypoint temp files" "jwt-primary-err is bootstrap's file (different \$\$)"
+else
+  pass "Cleanup trap references only entrypoint temp files"
 fi
 
 # =============================================
