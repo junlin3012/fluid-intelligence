@@ -199,6 +199,7 @@ is_success() {
 is_success 200 && pass "200 is success" || fail "200 is success" "rejected"
 is_success 201 && pass "201 is success" || fail "201 is success" "rejected"
 is_success 204 && pass "204 is success" || fail "204 is success" "rejected"
+is_success 299 && pass "299 is success" || fail "299 is success" "rejected"
 is_success 199 && fail "199 is success" "accepted" || pass "199 is not success"
 is_success 300 && fail "300 is success" "accepted" || pass "300 is not success"
 is_success 404 && fail "404 is success" "accepted" || pass "404 is not success"
