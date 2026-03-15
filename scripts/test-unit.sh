@@ -866,6 +866,25 @@ check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence
 check_connection_has_pageinfo "/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql" "CreateDiscountCode"
 
 # =============================================
+# REVIEW ROUND 47: Race condition defenses
+# =============================================
+echo "--- R47: Race condition defenses ---"
+
+# Bash version guard
+if grep -q 'BASH_VERSINFO' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh; then
+  pass "entrypoint.sh has bash version guard"
+else
+  fail "entrypoint.sh has bash version guard" "no BASH_VERSINFO check found"
+fi
+
+# Trap-responsive sleep (sleep & wait pattern)
+if grep -A1 'sleep 2' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | grep -q 'wait'; then
+  pass "start_and_verify sleep is trap-responsive"
+else
+  fail "start_and_verify sleep is trap-responsive" "sleep 2 not followed by wait (SIGTERM blocked during sleep)"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

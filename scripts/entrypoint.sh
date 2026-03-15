@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+# Require bash 4.3+ for wait -n support
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  echo "[fluid-intelligence] FATAL: bash 4.3+ required (have $BASH_VERSION)"
+  exit 1
+fi
+
 START_TIME=$(date +%s)
 elapsed() { echo $(( $(date +%s) - START_TIME )); }
 
@@ -100,7 +106,8 @@ done
 # --- Helper: start a process with early crash detection ---
 start_and_verify() {
   local name="$1" pid="$2"
-  sleep 2
+  sleep 2 &
+  wait $!
   if ! kill -0 "$pid" 2>/dev/null; then
     echo "[fluid-intelligence] FATAL: $name (PID $pid) crashed on startup"
     echo "[fluid-intelligence]   Check container logs above for $name stderr output"
