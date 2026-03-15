@@ -3,6 +3,7 @@ docs
 deploy
 *.md
 .DS_Store
-.env
+.env*
 *.pem
 *.key
+scripts/test-e2e.sh

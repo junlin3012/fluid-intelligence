@@ -13,11 +13,11 @@ COPY config/mcp-config.yaml /app/mcp-config.yaml
 COPY shopify-schema.graphql /app/shopify-schema.graphql
 COPY graphql/ /app/graphql/
 
-# Scripts/config owned by root (read-only to 1001), only /app/data writable
+# Copied files owned by root (read-only to 1001), only /app/data writable by 1001
+# Targeted chown avoids walking the entire /app tree (ContextForge venv = thousands of files)
 RUN chmod +x /app/entrypoint.sh /app/bootstrap.sh && \
-    chown -R root:0 /app && \
-    chmod -R a+r /app && \
-    chown -R 1001:0 /app/data
+    chown root:0 /app/entrypoint.sh /app/bootstrap.sh /app/mcp-config.yaml /app/shopify-schema.graphql && \
+    chown -R root:0 /app/graphql/
 
 USER 1001
 EXPOSE 8080
