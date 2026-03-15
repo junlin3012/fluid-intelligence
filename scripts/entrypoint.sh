@@ -68,11 +68,17 @@ start_and_verify() {
 
 # --- Start services ---
 
-# 1. Apollo MCP Server (Rust, Shopify GraphQL) — positional arg, NOT --config
-apollo /app/mcp-config.yaml &
+# 1. Apollo MCP Server (Rust, Shopify GraphQL) — via stdio→SSE bridge
+# Apollo only supports stdio or streamable_http transports.
+# ContextForge's MCP client has a bug with streamable_http, so we use stdio
+# and bridge it to SSE via mcpgateway.translate (same pattern as dev-mcp/sheets).
+python3 -m mcpgateway.translate \
+  --stdio "apollo /app/mcp-config.yaml" \
+  --expose-sse \
+  --port 8000 &
 APOLLO_PID=$!
 PIDS+=($APOLLO_PID)
-start_and_verify "Apollo" $APOLLO_PID
+start_and_verify "Apollo bridge" $APOLLO_PID
 
 # 2. IBM ContextForge (Python, gateway core)
 # The `mcpgateway` entry point and `python -m mcpgateway` both fail at runtime.
@@ -148,7 +154,7 @@ echo "[fluid-intelligence] Running bootstrap..."
 }
 
 echo "[fluid-intelligence] All services running"
-echo "  Apollo:         PID=$APOLLO_PID  :8000"
+echo "  Apollo bridge:  PID=$APOLLO_PID  :8000"
 echo "  ContextForge:   PID=$CONTEXTFORGE_PID  :${CONTEXTFORGE_PORT}"
 echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :8003"
 echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :8004"
@@ -158,7 +164,7 @@ echo "  auth-proxy:     PID=$AUTHPROXY_PID  :8080"
 wait -n $APOLLO_PID $CONTEXTFORGE_PID $TRANSLATE_DEVMCP_PID $TRANSLATE_SHEETS_PID $AUTHPROXY_PID
 EXIT_CODE=$?
 
-for name_pid in "Apollo:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$TRANSLATE_DEVMCP_PID" "sheets:$TRANSLATE_SHEETS_PID" "auth-proxy:$AUTHPROXY_PID"; do
+for name_pid in "Apollo-bridge:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$TRANSLATE_DEVMCP_PID" "sheets:$TRANSLATE_SHEETS_PID" "auth-proxy:$AUTHPROXY_PID"; do
   name="${name_pid%%:*}"
   pid="${name_pid##*:}"
   if ! kill -0 "$pid" 2>/dev/null; then

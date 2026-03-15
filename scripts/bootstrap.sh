@@ -66,11 +66,11 @@ register_server() {
   return 1
 }
 
-# Wait for Apollo before registering it (TCP connection check)
-echo "[bootstrap] Waiting for Apollo..."
-for i in $(seq 1 30); do
-  curl -s --connect-timeout 2 --max-time 3 http://localhost:8000/sse -o /dev/null 2>&1 && break
-  [ "$i" -eq 30 ] && { echo "[bootstrap] FATAL: Apollo not ready after 30s"; exit 1; }
+# Wait for Apollo bridge before registering it
+echo "[bootstrap] Waiting for Apollo bridge..."
+for i in $(seq 1 60); do
+  curl -sf --connect-timeout 2 --max-time 3 http://localhost:8000/sse > /dev/null 2>&1 && break
+  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo bridge not ready after 60s"; exit 1; }
   sleep 1
 done
 
