@@ -42,7 +42,7 @@ Traffic flow: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backen
 | `DATABASE_URL` | — | PostgreSQL connection string |
 | `AUTH_ENCRYPTION_SECRET` | — | JWT signing secret |
 | `PLATFORM_ADMIN_PASSWORD` | — | Admin API password |
-| `AUTH_REQUIRED` | true | Enable authentication |
+| `AUTH_REQUIRED` | true | **Set to `false`** — mcp-auth-proxy handles all external auth; ContextForge's internal auth uses HMAC JWT which conflicts with auth-proxy's RS256 JWT |
 | `CACHE_TYPE` | database | `database`, `memory`, or `redis` |
 | `HTTP_SERVER` | gunicorn | `gunicorn` or `granian` — only affects ContextForge's own entrypoint, which we bypass |
 
@@ -98,10 +98,12 @@ Total cold start: ~15-20s (with `--cpu-boost`)
 - mcp-auth-proxy binds to :8080 (matching Cloud Run's PORT)
 
 ### 4. Bootstrap server registration format
-- ContextForge API uses `POST /gateways` endpoint (NOT `/servers`)
-- Transport values must be uppercase: `SSE`, `STREAMABLEHTTP` (not lowercase)
+- ContextForge API uses `POST /servers` endpoint (NOT `/gateways`)
+- `/servers` auto-discovers tools; `/gateways` only stores metadata
+- Transport values: lowercase `sse` (NOT uppercase, NOT `streamablehttp`)
+- ContextForge's MCP client has a bug with `streamablehttp` transport — the initialize handshake fails with "connection closed: initialize notification". Use `sse` for all backends.
 - JWT token generated via `mcpgateway.utils.create_jwt_token` in ContextForge venv
-- Registration body: `{"name":"...","url":"...","transport":"SSE"}`
+- Registration body: `{"server":{"name":"...","url":"...","transport":"sse"}}`
 
 ### 5. Binary permissions in multi-stage Docker builds
 - `COPY --from=stage` preserves permissions from source stage

@@ -53,6 +53,22 @@
 - **What changed**: Rewrote config to match Apollo v1.9.0's actual format (verified against repo examples).
 - **Lesson**: This is the same lesson from "Source-Verify Before Speccing" (insights.md) but wasn't applied to config files. ALWAYS read the actual `--help`, source code, or example configs before writing configuration for any tool. "Probably works like X" is a trap.
 
+## 2026-03-15: ContextForge StreamableHTTP Client Bug — Apollo Tools Missing
+
+- **What happened**: After switching from `/gateways` to `/servers` endpoint for backend registration, Apollo registration returned HTTP 2xx but its tools never appeared in ContextForge's tool catalog. Only 23 tools visible (17 google-sheets + 6 shopify-dev-mcp), zero from Apollo.
+- **Root cause**: ContextForge's MCP Python SDK client (`mcp/client/streamable_http.py`) fails to complete the Streamable HTTP initialize handshake. Error: `Failed to create service: connection closed: initialize notification`. The translate module log confirmed `Protocols: SSE=True, StreamableHTTP=False` — the streamable HTTP protocol was effectively disabled in this ContextForge version (1.0.0-RC-2).
+- **What was missed**: The `Protocols: SSE=True, StreamableHTTP=False` log line was present from the start but wasn't noticed. The error appeared on every deployment but was buried among other logs.
+- **How it should have been caught**: When switching to `/servers` endpoint, should have verified ALL transport types work — not just assumed. The translate module log clearly stated StreamableHTTP=False.
+- **What changed**: Switched Apollo from `streamable_http` to `sse` transport in `mcp-config.yaml`. Updated bootstrap.sh to register Apollo at `/sse` endpoint with `sse` transport. All backends now use the same proven transport.
+- **Lesson**: When a platform (ContextForge) claims to support a protocol but it doesn't work, check the platform's own logs for protocol status. Don't fight the platform — use what works. SSE is universally supported; Streamable HTTP is newer and less stable in some implementations.
+
+## 2026-03-15: Double-Auth Problem — ContextForge Rejecting Auth-Proxy JWTs
+
+- **What happened**: MCP requests authenticated through auth-proxy got 401 from ContextForge. Auth-proxy issues RS256 JWTs, but ContextForge has its own auth expecting HMAC JWTs signed with `JWT_SECRET_KEY`.
+- **Root cause**: `AUTH_REQUIRED=true` on ContextForge meant it validated JWTs internally using HMAC — incompatible with auth-proxy's RS256 tokens. Two independent auth systems conflicting.
+- **What changed**: Set `AUTH_REQUIRED=false` on ContextForge. Auth-proxy handles all external auth; ContextForge trusts internal traffic (all within the same container).
+- **Lesson**: When you have a reverse proxy handling auth, the backend should trust the proxy, not double-check with incompatible credentials. This is the standard sidecar auth pattern.
+
 ## 2026-03-15: Misdiagnosed Claude.ai OAuth as Server-Side Bug
 
 - **What happened**: Claude.ai showed "There was an error connecting to the MCP server. Please check your server URL and make sure your server handles auth correctly." Multiple attempts to fix the server-side OAuth flow, including changing EXTERNAL_URL, debugging auth endpoints, testing DCR.
