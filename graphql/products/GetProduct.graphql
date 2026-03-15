@@ -1,0 +1,30 @@
+query GetProduct($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    handle
+    descriptionHtml
+    status
+    vendor
+    productType
+    tags
+    totalInventory
+    createdAt
+    updatedAt
+    variants(first: 50) {
+      edges {
+        node {
+          id
+          title
+          sku
+          price
+          inventoryQuantity
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+      }
+    }
+  }
+}

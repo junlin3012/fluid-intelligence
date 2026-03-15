@@ -1,7 +1,15 @@
 # mcp-config.yaml — Apollo MCP Server v1.9.0 configuration
 # Docs: https://github.com/apollographql/apollo-mcp-server
+#
+# Strategy: Predefined operations for common queries (products) +
+# execute/validate tools for dynamic queries (orders, customers, etc.)
+#
+# Apollo has a file-loading bug that silently drops queries against
+# complex types (Order, Customer). The execute tool bypasses this
+# and gives the AI unlimited query flexibility.
 
-endpoint: https://${SHOPIFY_STORE}/admin/api/${SHOPIFY_API_VERSION}/graphql.json
+# Apollo v1.9.0 uses ${env.VAR_NAME} syntax for env var expansion
+endpoint: https://${env.SHOPIFY_STORE}/admin/api/2026-01/graphql.json
 
 transport:
   type: stdio
@@ -10,16 +18,22 @@ schema:
   source: local
   path: /app/shopify-schema.graphql
 
+# Only products load reliably from files. Other queries (orders, customers,
+# inventory) fail silently due to Apollo schema tree-shaking bug.
+# Use the execute tool for those — it works perfectly.
 operations:
   source: local
   paths:
-    - /app/graphql/customers
-    - /app/graphql/orders
     - /app/graphql/products
-    - /app/graphql/inventory
-    - /app/graphql/fulfillments
-    - /app/graphql/metafields
-    - /app/graphql/transfers
+
+# Enable dynamic query execution and validation.
+# The execute tool lets the AI compose arbitrary GraphQL queries at runtime.
+# The validate tool lets it verify queries before executing.
+introspection:
+  execute:
+    enabled: true
+  validate:
+    enabled: true
 
 headers:
-  X-Shopify-Access-Token: ${SHOPIFY_ACCESS_TOKEN}
+  X-Shopify-Access-Token: ${env.SHOPIFY_ACCESS_TOKEN}

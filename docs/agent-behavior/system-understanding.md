@@ -89,12 +89,12 @@ Total cold start: ~15-20s (with `--cpu-boost`)
 - Workaround: Bypass entry point with direct `main()` invocation
 - This is SAFE as long as you don't need the CLI script
 
-### 2. Apollo skips all GraphQL mutation operations
-- All mutation `.graphql` files get "Skipping mutation operation X" warnings
-- Apollo v1.9.0 validates operations against the schema at load time
-- Root cause: GraphQL operations may use deprecated fields/inputs
-- Impact: Apollo exposes only query tools, no mutations
-- Fix needed: Update mutation operations to use current Shopify 2026-01 schema
+### 2. Apollo file-loading silently drops valid queries
+- Apollo v1.9.0 only loads 2 of 7 query operations from `.graphql` files (GetProducts, GetProduct)
+- All 5 dropped queries (GetOrders, GetOrder, GetCustomers, GetCustomer, GetInventoryLevels) pass Apollo's own `validate` tool and execute successfully via the `execute` tool
+- Root cause: Unknown bug in Apollo's file-loading/schema-tree-shaking pipeline, likely related to the complexity of Order/Customer type graphs (55+ dependent types)
+- **Workaround**: Enable `introspection.execute` and `introspection.validate` in `mcp-config.yaml`. The AI dynamically composes and executes queries via the `execute` tool — this is MORE powerful than predefined operations
+- Mutations are also skipped by default; can be enabled with `overrides.mutation_mode: explicit`
 
 ### 3. Cloud Run PORT is immutable
 - Cloud Run injects `PORT=8080` — you cannot override it
@@ -113,6 +113,41 @@ Total cold start: ~15-20s (with `--cpu-boost`)
 - `COPY --from=stage` preserves permissions from source stage
 - But verify with `chmod 755` explicitly after COPY
 - UBI Minimal has no `file` command for binary type checking
+
+## Two-Layer Docker Architecture
+
+The deployment uses a fat base image + thin app image for fast iteration:
+
+```
+deploy/Dockerfile.base (rebuild rarely, ~10 min)
+├── FROM rust:1.82-slim-bookworm  → Apollo Rust compile
+├── FROM alpine:3.20              → mcp-auth-proxy binary
+├── FROM ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2  → Base image
+│   ├── microdnf install nodejs npm curl jq tar gzip
+│   ├── uv install (Python package manager)
+│   ├── tini (PID 1 init)
+│   ├── COPY apollo binary
+│   └── COPY mcp-auth-proxy binary
+└── Push to: asia-southeast1-docker.pkg.dev/.../fluid-intelligence-base:latest
+
+deploy/Dockerfile (rebuild every change, ~5 sec build)
+├── FROM fluid-intelligence-base:latest
+├── COPY scripts/entrypoint.sh, bootstrap.sh
+├── COPY config/mcp-config.yaml
+├── COPY shopify-schema.graphql
+└── COPY graphql/ (query operations)
+```
+
+Build commands:
+- Base: `gcloud builds submit --config=deploy/cloudbuild-base.yaml`
+- App: `gcloud builds submit --config=deploy/cloudbuild.yaml`
+
+## Memory Configuration
+
+- Cloud Run memory: **4Gi** (was 2Gi, caused OOM with 5 processes + 98K-line schema)
+- CPU: 2 vCPU
+- `--no-cpu-throttling` required for background processes
+- `--cpu-boost` for faster cold starts
 
 ## Database
 

@@ -17,7 +17,7 @@ steps:
       - '--cpu-boost'
       - '--min-instances=1'
       - '--max-instances=1'
-      - '--memory=2Gi'
+      - '--memory=4Gi'
       - '--cpu=2'
       - '--timeout=300'
       - '--startup-probe=failureThreshold=48,periodSeconds=5,timeoutSeconds=5,tcpSocket.port=8080'

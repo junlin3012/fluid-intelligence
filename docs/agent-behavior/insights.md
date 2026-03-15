@@ -130,6 +130,43 @@
 - **Key discovery**: `uv pip install` into an existing venv can corrupt entry point scripts while leaving module imports intact. The `mcpgateway` CLI script broke (`ModuleNotFoundError`) but `python3 -m mcpgateway.translate` worked fine.
 - **Pattern**: Before submitting ANY Cloud Build: (1) Read ALL logs from the last failure, including stderr and tracebacks, (2) Trace the chronological startup sequence, (3) Identify every process that should start and verify it has a log entry, (4) Fix ALL issues in one commit. One well-analyzed build beats five guess-and-check builds.
 
+## 2026-03-15: Apollo Execute Tool > Predefined Operations
+
+- **Context**: Apollo file-loading pipeline silently drops valid queries. After enabling `introspection.execute` in config, the AI can dynamically compose any GraphQL query and execute it on the fly.
+- **Insight**: The `execute` tool is actually SUPERIOR to predefined `.graphql` files:
+  1. **Unlimited flexibility** — AI composes queries dynamically based on what it learns from dev-mcp docs
+  2. **No deploy cycle** — adding a new query doesn't require a redeploy
+  3. **Schema introspection** — can validate queries before executing
+  4. **Complex joins** — AI can build multi-level nested queries on demand
+- **Pattern**: For Apollo MCP Server, prefer `introspection.execute` over predefined operations. Keep predefined operations only for common, well-tested queries (like GetProducts). Let the AI compose everything else.
+
+## 2026-03-15: Two-Layer Docker Split — Fast Iteration
+
+- **Context**: User frustrated by 4-5 minute rebuilds for every code change. Implemented a fat base image (ContextForge + Apollo + auth-proxy + all system deps) and thin app image (just scripts + config).
+- **Insight**: The thin image builds in ~5 seconds and deploys in ~3 minutes (mostly Cloud Run infrastructure time). The base image takes ~10 minutes but only needs rebuilding when upstream dependencies change.
+- **Pattern**: `Dockerfile.base` = immutable upstream dependencies (rebuild rarely). `Dockerfile` = our code (rebuild fast). Use `cloudbuild-base.yaml` for base, `cloudbuild.yaml` for thin.
+
+## 2026-03-15: BI Test Validates End-to-End AI Intelligence
+
+- **Context**: User asked to test if an AI could intelligently answer: "Give me sales of Artemis pricking irons in the past 5 months, analyze repeat customer behavior."
+- **Insight**: The test validated the full intelligence chain: tool discovery → product search → API docs research → dynamic query composition → data analysis → business insights. The AI successfully:
+  1. Discovered 25 tools via MCP tools/list
+  2. Found 16 Artemis products using GetProducts
+  3. Learned SKU filter syntax from dev-mcp docs
+  4. Composed a complex GraphQL query with nested lineItems, customer, and variant data
+  5. Executed via Apollo's execute tool (bypassing the file-loading bug)
+  6. Analyzed 49 orders: $8,434 revenue, 147 units, 4 repeat customers (8.9% repeat rate)
+- **Pattern**: Complex BI queries require the AI to chain multiple tools together. The dev-mcp docs → introspect schema → compose query → execute pipeline is the gold standard for Shopify intelligence.
+
+## 2026-03-15: ContextForge Two-Tier Model — Gateways vs Servers vs Virtual Servers
+
+- **Context**: MCP tools/list returned empty despite 23 tools in the REST catalog. Root cause: ContextForge has a three-tier model.
+- **Insight**:
+  1. `/gateways` — registers backends, triggers auto-discovery into the REST tool catalog
+  2. `/servers` — NOT the same as gateways. Creates virtual servers that bundle subsets of tools
+  3. MCP clients connect to `/servers/<UUID>/mcp`. Without a virtual server, `tools/list` returns empty.
+- **Pattern**: After registering all gateways, MUST create a virtual server that bundles all tool IDs. This is done in `bootstrap.sh`. The virtual server is what MCP clients actually interact with.
+
 ## 2026-03-14: Gateway Backends — Separate Headless vs Local Tools
 
 - **Context**: User wanted Google Workspace MCP (90 tools, 1.8K stars) for the gateway. Analysis showed it requires browser OAuth (not headless-friendly) and adds 90 tools to context. Recommended `xing5/mcp-google-sheets` (17 tools, service account auth) for the gateway and `taylorwilsdon/google_workspace_mcp` for local Claude Code use.

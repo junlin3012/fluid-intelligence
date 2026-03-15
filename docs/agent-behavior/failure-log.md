@@ -69,6 +69,44 @@
 - **What changed**: Set `AUTH_REQUIRED=false` on ContextForge. Auth-proxy handles all external auth; ContextForge trusts internal traffic (all within the same container).
 - **Lesson**: When you have a reverse proxy handling auth, the backend should trust the proxy, not double-check with incompatible credentials. This is the standard sidecar auth pattern.
 
+## 2026-03-15: Apollo File-Loading Silently Drops Valid Queries
+
+- **What happened**: Only 2 of 7 GraphQL query operations loaded in Apollo MCP Server (GetProducts, GetProduct). The remaining 5 (GetOrders, GetOrder, GetCustomers, GetCustomer, GetInventoryLevels) were silently dropped — no error, no warning, no log entry.
+- **Root cause**: NOT a schema validation issue. All 5 queries pass both Shopify dev-mcp validation AND Apollo's own `validate` tool. The `execute` tool also runs them successfully against the live API. The bug is specifically in Apollo's **file-loading pipeline** — it validates and executes queries fine but fails to register them as MCP tools when loaded from `.graphql` files. Root cause is likely in Apollo's schema tree-shaking algorithm which trims the schema to include only types needed by operations. The Order/Customer types reference 55+ additional types vs Product's simpler type graph.
+- **What was missed**: Spent multiple deploy cycles (5+ builds) trying to isolate: separated mutations into query-only dirs, increased memory from 2Gi to 4Gi, enabled debug logging, tested minimal single-field queries. None helped. Should have enabled the `execute` tool earlier.
+- **Workaround**: Enable `introspection.execute` and `introspection.validate` in `mcp-config.yaml`. The AI can dynamically compose and execute any query via the `execute` tool — which is actually MORE powerful than predefined operations.
+- **Lesson**: When a tool silently drops valid inputs, don't keep testing variations of the input. Enable the tool's diagnostic features (introspection, validate, execute) and bypass the broken pipeline. Apollo's execute tool is the correct long-term approach — it gives the AI unlimited query flexibility rather than being locked to predefined operations.
+
+## 2026-03-15: OAuth Flow Uses Cookie-Based Login, Not HTTP Basic Auth
+
+- **What happened**: E2E test scripts initially used `curl -u user:password` for OAuth authentication. This worked for some MCP auth proxies but the current mcp-auth-proxy v2.5.4 uses a cookie-based login form. The auth endpoint (`.idp/auth`) returns a 302 redirect to a login page (`.auth/login`), which must be POSTed to with `password=...` using a session cookie.
+- **Root cause**: The OAuth flow in mcp-auth-proxy is a multi-step browser-like flow: (1) GET auth URL → get session cookie + redirect, (2) POST password to login URL with session cookie, (3) follow redirect to get auth code. HTTP Basic Auth is not supported.
+- **Impact**: Token acquisition failed silently (empty token), causing all subsequent MCP calls to fail with "Invalid token."
+- **What changed**: Updated test commands to use curl cookie jars (-c/-b flags) and the 3-step login flow.
+- **Lesson**: Read the existing E2E test script (`test-e2e.sh`) before writing ad-hoc auth commands. The working flow is already documented in code.
+
+## 2026-03-15: JSON Parsing Fails on ContextForge Tool Descriptions
+
+- **What happened**: MCP `tools/list` response from ContextForge contains literal newline characters inside JSON string values (tool descriptions). Python's `json.loads()` with default `strict=True` rejects these as "Invalid control character."
+- **Root cause**: ContextForge doesn't escape newlines in tool descriptions when serializing to JSON. This is a ContextForge bug but easy to work around.
+- **Workaround**: Use `json.loads(data, strict=False)` to accept control characters in strings.
+- **Lesson**: Always use `strict=False` when parsing JSON from MCP servers — tool descriptions may contain unescaped newlines.
+
+## 2026-03-15: Cloud Run Memory OOM at 2Gi
+
+- **What happened**: Cloud Run logs showed "Memory limit of 2048 MiB exceeded with 2070 MiB used." Container running 5 processes with a 98K-line schema file was marginally over the 2Gi limit.
+- **Root cause**: Apollo loading and parsing the 98K-line Shopify schema + ContextForge + dev-mcp + google-sheets bridges all share the same 2Gi memory space.
+- **What changed**: Increased memory to 4Gi in `cloudbuild.yaml`. Also updated the `gcloud run services update` command for immediate effect.
+- **Lesson**: Multi-process containers need generous memory. The Shopify schema alone is ~3.2MB of text. When running 5 processes including a Rust binary that parses large schemas, 4Gi is the minimum.
+
+## 2026-03-15: Excessive Cloud Build Iterations for Apollo Debugging (8+ builds wasted)
+
+- **What happened**: Spent 8+ Cloud Build iterations (~$0.50-1.00 each, 3-5 min each) trying to fix Apollo's query file-loading: separated mutations, created query-only dirs, increased memory, enabled debug logging, created minimal test queries, added test directories. Each iteration revealed the same result: still only 2 tools.
+- **Root cause**: Treated a tool-level bug (Apollo's file-loading pipeline) as a configuration problem. Each "fix" was a hypothesis test deployed to production instead of a local analysis. The correct approach was found eventually: enable `introspection.execute` which bypasses the broken file-loading entirely.
+- **Cost**: ~$4-8 in Cloud Build costs, ~30 minutes of deploy cycles. User explicitly called out: "make sure there are no performance red flags" and "keep compute cost in mind."
+- **How it should have been caught**: After the first 2 deploys showed no change, should have pivoted to: (1) Read Apollo's source code for the file-loading logic, (2) Enable diagnostic tools (validate/execute) to test from inside, (3) Check for known issues. Instead, kept deploying with small variations.
+- **Lesson**: After 2 failed deploys testing the same hypothesis, STOP deploying and change strategy. Each Cloud Build costs real money (~$0.50-1.00). Debugging should happen through log analysis and local testing, not through production deploys.
+
 ## 2026-03-15: Misdiagnosed Claude.ai OAuth as Server-Side Bug
 
 - **What happened**: Claude.ai showed "There was an error connecting to the MCP server. Please check your server URL and make sure your server handles auth correctly." Multiple attempts to fix the server-side OAuth flow, including changing EXTERNAL_URL, debugging auth endpoints, testing DCR.

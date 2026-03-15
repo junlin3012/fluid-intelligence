@@ -1,0 +1,34 @@
+query GetInventoryLevels($locationId: ID!, $first: Int = 50) {
+  location(id: $locationId) {
+    id
+    name
+    inventoryLevels(first: $first) {
+      edges {
+        node {
+          id
+          quantities(names: ["available", "incoming", "committed", "on_hand"]) {
+            name
+            quantity
+          }
+          item {
+            id
+            sku
+            variant {
+              id
+              title
+              product {
+                id
+                title
+              }
+            }
+          }
+          updatedAt
+        }
+        cursor
+      }
+      pageInfo {
+        hasNextPage
+      }
+    }
+  }
+}

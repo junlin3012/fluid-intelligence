@@ -60,6 +60,18 @@
 - All secrets in Secret Manager, never hardcode or commit
 - Secret names: `shopify-client-id`, `shopify-client-secret`, `mcp-auth-passphrase`, `mcp-jwt-secret`, `google-oauth-client-id`, `google-oauth-client-secret`, `google-sheets-credentials`, `db-password`
 
+## Cost Consciousness (CRITICAL)
+
+Cloud cost and efficiency MUST be part of every design decision. The target monthly GCP bill is $65-85/mo.
+
+- **Cloud Build**: Each `gcloud builds submit` costs ~$0.50-1.00 and takes 3-5 minutes. NEVER submit speculative "let's see if this works" builds. Fix ALL issues in one commit.
+- **Cloud Run**: min-instances=1 with no-cpu-throttling = ~$55-70/mo. This is the majority of the bill. Do NOT increase max-instances unless auth state is externalized.
+- **Cloud Build machines**: Use `e2-highcpu-8` (NOT `e2-highcpu-32`). The larger machine has quota restrictions in asia-southeast1 and costs 4x more.
+- **Schema size**: The 98K-line Shopify schema consumes significant memory. Consider trimming unused types if memory becomes an issue.
+- **Base image rebuilds**: Only rebuild the base image when upstream dependencies (Apollo, ContextForge, auth-proxy) change. App changes go through the thin Dockerfile.
+- **Diagnostic deploys**: When debugging, prefer log analysis over additional deploys. One thorough log read > five guess-and-check deploys.
+- **Agents must track**: Before each deploy, consider: "Is this deploy strictly necessary, or can I verify locally first?"
+
 ## Scaling
 
 - **max-instances=1**: Required while mcp-auth-proxy uses in-memory state

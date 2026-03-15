@@ -1,24 +1,58 @@
-# Dockerfile.base — Apollo MCP Server (Rust compile)
-# Rebuild rarely: only when Apollo version changes
-# Build time: ~20 min
+# Dockerfile.base — All immutable dependencies (rebuild rarely)
+# Contains: ContextForge + Apollo binary + mcp-auth-proxy + system deps
+# Rebuild when: Apollo/ContextForge/auth-proxy version changes
+# Build time: ~20 min (Apollo Rust compile dominates)
 
-FROM rust:1.82-slim-bookworm AS builder
+# Stage 1: Apollo MCP Server (Rust compile)
+FROM rust:1.82-slim-bookworm AS apollo-builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config libssl-dev git make perl cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# Use system OpenSSL instead of compiling from source
 ENV OPENSSL_NO_VENDOR=1
 
-# Clone and build Apollo MCP Server v1.9.0
 ARG APOLLO_VERSION=v1.9.0
 RUN git clone --depth 1 --branch ${APOLLO_VERSION} \
     https://github.com/apollographql/apollo-mcp-server.git /src
 WORKDIR /src
 RUN cargo build --release --locked
 
-# Output: just the binary
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /src/target/release/apollo-mcp-server /usr/local/bin/apollo
+# Stage 2: mcp-auth-proxy binary
+FROM alpine:3.20 AS authproxy
+ADD https://github.com/sigbit/mcp-auth-proxy/releases/download/v2.5.4/mcp-auth-proxy-linux-amd64 /mcp-auth-proxy
+RUN chmod +x /mcp-auth-proxy
+
+# Stage 3: Runtime — ContextForge base + all system deps + binaries
+FROM ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
+
+USER root
+
+# System packages (nodejs for dev-mcp, npm for npx, curl/jq for bootstrap)
+RUN microdnf install -y nodejs npm curl jq tar gzip && microdnf clean all
+
+# uv (standalone binary — for mcp-google-sheets)
+RUN curl -fsSL https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz \
+    | tar -xz --strip-components=1 -C /usr/local/bin
+
+# psycopg2 for PostgreSQL (uv pip install corrupts mcpgateway CLI entry point,
+# but we bypass it with direct main() invocation — see entrypoint.sh)
+RUN uv pip install --python /app/.venv/bin/python psycopg2-binary
+
+# tini (PID 1 init process)
+RUN curl -fsSL https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd64 \
+      -o /usr/local/bin/tini && \
+    echo "93dcc18adc78c65a028a84799ecf8ad40c936fdfc5f2a57b1acda5a8117fa82c  /usr/local/bin/tini" | sha256sum -c - && \
+    chmod +x /usr/local/bin/tini
+
+# Copy pre-compiled binaries
+COPY --from=apollo-builder /src/target/release/apollo-mcp-server /usr/local/bin/apollo
+COPY --from=authproxy /mcp-auth-proxy /usr/local/bin/mcp-auth-proxy
+RUN chmod 755 /usr/local/bin/apollo /usr/local/bin/mcp-auth-proxy
+
+# Verify ContextForge venv is intact
+RUN /app/.venv/bin/python -c "from mcpgateway.cli import main; print('✓ mcpgateway OK')"
+RUN /app/.venv/bin/python -c "import psycopg2; print('✓ psycopg2 OK')"
+
+# Create data directory
+RUN mkdir -p /app/data && chown -R 1001:0 /app

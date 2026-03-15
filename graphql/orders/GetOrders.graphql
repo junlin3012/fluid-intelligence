@@ -1,0 +1,28 @@
+query GetOrders($first: Int = 10, $query: String) {
+  orders(first: $first, query: $query) {
+    edges {
+      node {
+        id
+        name
+        createdAt
+        displayFulfillmentStatus
+        displayFinancialStatus
+        totalPriceSet {
+          shopMoney {
+            amount
+            currencyCode
+          }
+        }
+        customer {
+          id
+          firstName
+          lastName
+        }
+      }
+      cursor
+    }
+    pageInfo {
+      hasNextPage
+    }
+  }
+}

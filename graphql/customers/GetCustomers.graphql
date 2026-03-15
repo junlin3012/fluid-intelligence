@@ -1,0 +1,23 @@
+query GetCustomers($first: Int = 10, $query: String) {
+  customers(first: $first, query: $query) {
+    edges {
+      node {
+        id
+        firstName
+        lastName
+        displayName
+        amountSpent {
+          amount
+          currencyCode
+        }
+        createdAt
+        updatedAt
+        tags
+      }
+      cursor
+    }
+    pageInfo {
+      hasNextPage
+    }
+  }
+}
