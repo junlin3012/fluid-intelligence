@@ -934,8 +934,8 @@ else
 fi
 
 # bootstrap.sh all curl calls have --connect-timeout
-BOOT_CURL_TOTAL=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -c 'curl ') || BOOT_CURL_TOTAL=0
-BOOT_CURL_TIMEOUT=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -c 'connect-timeout') || BOOT_CURL_TIMEOUT=0
+BOOT_CURL_TOTAL=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -v 'echo\|FATAL' | grep -c 'curl ') || BOOT_CURL_TOTAL=0
+BOOT_CURL_TIMEOUT=$(grep -v '^[[:space:]]*#' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/bootstrap.sh | grep -v 'echo\|FATAL' | grep -c 'connect-timeout') || BOOT_CURL_TIMEOUT=0
 if [ "$BOOT_CURL_TOTAL" -eq "$BOOT_CURL_TIMEOUT" ]; then
   pass "bootstrap.sh all $BOOT_CURL_TOTAL curl calls have --connect-timeout"
 else

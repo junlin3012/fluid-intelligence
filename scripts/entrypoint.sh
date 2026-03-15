@@ -176,7 +176,8 @@ for i in $(seq 1 180); do
   fi
   # Check if mcpgateway is still alive (fast-fail instead of waiting full timeout)
   if ! kill -0 "$CONTEXTFORGE_PID" 2>/dev/null; then
-    echo "[fluid-intelligence] FATAL: ContextForge process died during startup"
+    wait "$CONTEXTFORGE_PID" 2>/dev/null; cf_exit=$?
+    echo "[fluid-intelligence] FATAL: ContextForge process died during startup (exit code $cf_exit)"
     for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
     exit 1
   fi

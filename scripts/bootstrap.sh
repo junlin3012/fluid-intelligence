@@ -103,7 +103,7 @@ for i in $(seq 1 60); do
   # curl exit 28 = timeout (connected but SSE stream) = success
   rc=0; curl -s --connect-timeout 2 --max-time 1 http://127.0.0.1:8000/sse -o /dev/null 2>&1 || rc=$?
   [ "$rc" -eq 0 ] || [ "$rc" -eq 28 ] && break
-  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo bridge not ready after 60s"; exit 1; }
+  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo bridge not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
 done
 
@@ -121,7 +121,7 @@ for i in $(seq 1 90); do
     fi
   fi
   curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/healthz > /dev/null 2>&1 && break
-  [ "$i" -eq 90 ] && { echo "[bootstrap] FATAL: dev-mcp bridge not ready after 90s"; exit 1; }
+  [ "$i" -eq 90 ] && { echo "[bootstrap] FATAL: dev-mcp bridge not ready after 90s (last curl rc=$?)"; exit 1; }
   sleep 1
 done
 
@@ -139,7 +139,7 @@ for i in $(seq 1 60); do
     fi
   fi
   curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8004/healthz > /dev/null 2>&1 && break
-  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: google-sheets bridge not ready after 60s"; exit 1; }
+  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: google-sheets bridge not ready after 60s (last curl rc=$?)"; exit 1; }
   sleep 1
 done
 
