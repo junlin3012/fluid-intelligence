@@ -28,6 +28,11 @@ app = FastAPI(title="Shopify OAuth Service")
 
 @app.on_event("startup")
 def startup():
+    missing = [v for v in ("SHOPIFY_CLIENT_ID", "SHOPIFY_CLIENT_SECRET", "SHOPIFY_TOKEN_ENCRYPTION_KEY", "CALLBACK_URL") if not getattr(settings, v)]
+    if missing:
+        log.error(f"FATAL: Required settings missing or empty: {', '.join(missing)}")
+        raise SystemExit(1)
+
     try:
         conn = get_connection()
         try:
@@ -107,6 +112,13 @@ def callback(request: Request):
     access_token, scopes = exchange_code_for_token(shop, code)
     if not access_token:
         return Response("Token exchange failed", status_code=502)
+
+    if settings.SHOPIFY_SCOPES:
+        requested = set(settings.SHOPIFY_SCOPES.replace(":", ",").split(","))
+        granted = set(scopes.split(",")) if scopes else set()
+        missing = requested - granted
+        if missing:
+            log.warning(f"Shopify granted fewer scopes than requested for {shop}. Missing: {missing}")
 
     store_installation(shop, access_token, scopes)
 
