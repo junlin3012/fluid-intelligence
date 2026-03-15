@@ -944,6 +944,25 @@ else
 fi
 
 # =============================================
+# REVIEW ROUND 50: PID array safety + token guard
+# =============================================
+echo "--- R50: PID array + token guard ---"
+
+# PIDS cleanup uses exact match (not substring replacement)
+if grep -A3 'Remove completed bootstrap' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh | grep -q 'for p in'; then
+  pass "PIDS cleanup uses exact match loop"
+else
+  fail "PIDS cleanup uses exact match loop" "still using substring replacement (corrupts PIDs)"
+fi
+
+# Post-loop token guard
+if grep -q 'SHOPIFY_ACCESS_TOKEN:?' /Users/junlin/Projects/Shopify/fluid-intelligence/scripts/entrypoint.sh; then
+  pass "SHOPIFY_ACCESS_TOKEN has post-loop guard"
+else
+  fail "SHOPIFY_ACCESS_TOKEN has post-loop guard" "no guard after token fetch loop"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

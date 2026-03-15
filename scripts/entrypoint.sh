@@ -100,6 +100,7 @@ for attempt in 1 2 3 4 5; do
   echo "[fluid-intelligence] Token attempt $attempt failed (HTTP $http_code)"
   sleep "$((attempt * 2))"
 done
+: "${SHOPIFY_ACCESS_TOKEN:?Token loop exited without setting SHOPIFY_ACCESS_TOKEN}"
 
 # Shopify schema (SDL) is baked into the image at /app/shopify-schema.graphql
 # To update: re-run introspection and convert to SDL (see CLAUDE.md)
@@ -221,7 +222,10 @@ wait "$BOOTSTRAP_PID" || {
   exit 1
 }
 # Remove completed bootstrap PID from PIDS to avoid killing a reused PID
-PIDS=( "${PIDS[@]/$BOOTSTRAP_PID}" )
+# Use exact match loop (not substring replacement which corrupts e.g. PID 12 inside 1234)
+NEW_PIDS=()
+for p in "${PIDS[@]}"; do [ "$p" != "$BOOTSTRAP_PID" ] && NEW_PIDS+=("$p"); done
+PIDS=("${NEW_PIDS[@]}")
 
 echo "[fluid-intelligence] All services running [+$(elapsed)s]"
 echo "  Apollo bridge:  PID=$APOLLO_PID  :8000"
