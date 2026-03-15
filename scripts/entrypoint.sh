@@ -87,11 +87,48 @@ export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
 export MCG_PORT="$CONTEXTFORGE_PORT"
 export MCG_HOST="0.0.0.0"
 
-# --- Fetch Shopify access token via client credentials ---
-TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
-echo "[fluid-intelligence] Fetching Shopify access token..."
-body=""
-for attempt in 1 2 3 4 5; do
+# --- Read Shopify access token from Cloud SQL (OAuth service writes it) ---
+echo "[fluid-intelligence] Checking Cloud SQL for Shopify token..."
+DB_TOKEN=$(/app/.venv/bin/python3 -c "
+import os, sys
+try:
+    import psycopg2
+    conn = psycopg2.connect(
+        dbname=os.environ.get('DB_NAME', 'contextforge'),
+        user=os.environ.get('DB_USER', 'contextforge'),
+        password=os.environ.get('DB_PASSWORD', ''),
+        host='/cloudsql/junlinleather-mcp:asia-southeast1:contextforge'
+    )
+    cur = conn.cursor()
+    cur.execute('SELECT access_token_encrypted FROM shopify_installations WHERE shop_domain = %s AND status = %s',
+                (os.environ.get('SHOPIFY_STORE', ''), 'active'))
+    row = cur.fetchone()
+    if row and row[0]:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        import base64
+        key = base64.b64decode(os.environ.get('SHOPIFY_TOKEN_ENCRYPTION_KEY', ''))
+        data = base64.b64decode(row[0])
+        nonce, ct = data[:12], data[12:]
+        print(AESGCM(key).decrypt(nonce, ct, None).decode())
+    conn.close()
+except Exception as e:
+    print(f'DB_TOKEN_ERROR: {e}', file=sys.stderr)
+" 2>/tmp/db-token-err-$$.log) || true
+
+if [ -n "$DB_TOKEN" ] && [[ "$DB_TOKEN" == shp* ]]; then
+  export SHOPIFY_ACCESS_TOKEN="$DB_TOKEN"
+  echo "[fluid-intelligence] Shopify token loaded from Cloud SQL (permanent offline token)"
+  rm -f /tmp/db-token-err-$$.log
+else
+  echo "[fluid-intelligence] No token in Cloud SQL, falling back to client_credentials..."
+  [ -f /tmp/db-token-err-$$.log ] && [ -s /tmp/db-token-err-$$.log ] && echo "[fluid-intelligence]   DB error: $(cat /tmp/db-token-err-$$.log)"
+  rm -f /tmp/db-token-err-$$.log
+
+  # --- Fallback: Fetch Shopify access token via client credentials (24h expiry) ---
+  TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
+  echo "[fluid-intelligence] Fetching Shopify access token via client_credentials..."
+  body=""
+  for attempt in 1 2 3 4 5; do
   # Pass credentials via stdin to avoid exposing SHOPIFY_CLIENT_SECRET in /proc/cmdline
   # Capture HTTP status separately for diagnostics on failure
   http_code=0
@@ -126,6 +163,7 @@ for attempt in 1 2 3 4 5; do
   sleep "$((attempt * 2))"
 done
 : "${SHOPIFY_ACCESS_TOKEN:?Token loop exited without setting SHOPIFY_ACCESS_TOKEN}"
+fi  # end of client_credentials fallback
 
 # Shopify schema (SDL) is baked into the image at /app/shopify-schema.graphql
 # To update: re-run introspection against Shopify Admin API and rebuild Dockerfile.base
