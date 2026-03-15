@@ -121,8 +121,8 @@ if [ -n "$AUTH_SESSION" ]; then
   CODE_REDIRECT=$(curl -s -D - -o /dev/null --max-time 10 \
     -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
     "$BASE$AUTH_SESSION" 2>/dev/null)
-  AUTH_CODE=$(echo "$CODE_REDIRECT" | grep -o "code=[^&]*" | head -1 | sed 's/code=//')
-  RETURNED_STATE=$(echo "$CODE_REDIRECT" | grep -o "state=[^&\"]*" | head -1 | sed 's/state=//')
+  AUTH_CODE=$(echo "$CODE_REDIRECT" | grep -o "code=[^&[:space:]]*" | head -1 | sed 's/code=//')
+  RETURNED_STATE=$(echo "$CODE_REDIRECT" | grep -o "state=[^&[:space:]\"]*" | head -1 | sed 's/state=//')
 fi
 
 if [ -n "$AUTH_CODE" ]; then
@@ -213,12 +213,13 @@ echo "--- 4. MCP Protocol (root /mcp) ---"
 
 mcp_post() {
   local path="$1" body="$2"
-  curl -sf --max-time 15 -X POST \
+  # Use -s without -f so server error responses are captured (not silenced)
+  curl -s --max-time 15 -X POST \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
     -d "$body" \
-    "$BASE$path" 2>&1
+    "$BASE$path" 2>/dev/null
 }
 
 # Initialize

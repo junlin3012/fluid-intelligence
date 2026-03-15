@@ -119,6 +119,7 @@ register_gateway "google-sheets" "http://127.0.0.1:8004/sse" "SSE"
 # Verify tools discovered
 echo "[bootstrap] All 3 backends registered"
 TOOL_COUNT=$(curl -sf --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
+[[ "$TOOL_COUNT" =~ ^[0-9]+$ ]] || TOOL_COUNT=0
 echo "[bootstrap] $TOOL_COUNT tools in catalog"
 if [ "$TOOL_COUNT" -eq 0 ]; then
   echo "[bootstrap] WARNING: Zero tools discovered — check backend registrations above"
