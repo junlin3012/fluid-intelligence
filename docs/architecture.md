@@ -166,7 +166,7 @@ gcloud builds submit --config=deploy/cloudbuild.yaml \
 | Memory | **4Gi** | 5 processes + 98K-line schema. 2Gi caused OOM. |
 | `--no-cpu-throttling` | Yes | **Required** — background processes freeze without it |
 | `--cpu-boost` | Yes | Faster cold starts |
-| `--min-instances` | 1 | Avoids cold starts entirely |
+| `--min-instances` | 0 | Scale to zero when idle (~15 min). Cold start ~15-20s. |
 | `--max-instances` | 1 | In-memory auth state prevents horizontal scaling |
 | Startup probe | TCP :8080, 48x5s | 240s timeout for startup |
 
@@ -178,16 +178,16 @@ gcloud builds submit --config=deploy/cloudbuild.yaml \
 
 | Resource | Configuration | Estimated Cost |
 |----------|--------------|----------------|
-| Cloud Run | 2 vCPU, 4Gi, min-instances=1, no-cpu-throttling | ~$55-70/mo |
+| Cloud Run | 2 vCPU, 4Gi, min-instances=0, no-cpu-throttling | ~$5-15/mo |
 | Cloud SQL | db-f1-micro (shared vCPU, 0.6GB RAM) | ~$8/mo |
 | Artifact Registry | Container images (~2GB) | ~$0.50/mo |
 | Cloud Build | ~5 builds/day, e2-standard-4 | ~$2-5/mo |
 | Secret Manager | 12 secrets, ~100 accesses/day | ~$0.10/mo |
-| **Total** | | **~$65-85/mo** |
+| **Total** | | **~$15-25/mo** |
 
 ### Cost Optimization Strategies
 
-1. **min-instances=1**: Prevents cold starts ($0 additional cost vs min-instances=0 + frequent cold starts)
+1. **min-instances=0**: Scale to zero when idle. Saves ~$50/mo vs always-on. 15-20s cold start is acceptable for a tool used a few hours/day.
 2. **max-instances=1**: Caps maximum cost. Horizontal scaling not needed for single-tenant use.
 3. **db-f1-micro**: Smallest Cloud SQL instance. Upgrade to db-g1-small if query latency becomes an issue.
 4. **Two-layer Docker**: Avoids rebuilding base image (which uses expensive e2-highcpu-8 machines) unless truly needed.
