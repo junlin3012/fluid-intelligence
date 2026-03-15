@@ -25,15 +25,19 @@ CF="http://localhost:${CONTEXTFORGE_PORT:-4444}"
 
 # Register a backend MCP server with ContextForge via /servers endpoint
 # This endpoint auto-discovers tools from the backend (unlike /gateways)
+# Always re-registers to pick up URL/transport changes across deployments
 register_server() {
   local name="$1" url="$2" transport="$3"
 
-  # Check if already registered via /servers list
-  if curl -sf -H "Authorization: Bearer $TOKEN" \
+  # Delete any existing registration (stale URL/transport from previous deploy)
+  local existing_id
+  existing_id=$(curl -sf -H "Authorization: Bearer $TOKEN" \
     "$CF/servers" 2>/dev/null | \
-    jq -e ".[] | select(.name==\"$name\")" > /dev/null 2>&1; then
-    echo "[bootstrap] $name already registered, skipping"
-    return 0
+    jq -r ".[] | select(.name==\"$name\") | .id" 2>/dev/null) || true
+  if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
+    echo "[bootstrap] Deleting stale $name (id=$existing_id)"
+    curl -sf -X DELETE -H "Authorization: Bearer $TOKEN" \
+      "$CF/servers/$existing_id" > /dev/null 2>&1 || true
   fi
 
   local max_attempts=3 attempt=1
@@ -48,12 +52,6 @@ register_server() {
 
     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
       echo "[bootstrap] Registered $name via /servers"
-      return 0
-    fi
-
-    # 409 = already exists (idempotent success)
-    if [ "$http_code" -eq 409 ]; then
-      echo "[bootstrap] $name already exists (409), skipping"
       return 0
     fi
 
