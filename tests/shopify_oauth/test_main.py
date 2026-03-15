@@ -19,10 +19,17 @@ from services.shopify_oauth.security import compute_hmac
 # Use https://testserver so Secure cookies are included in test requests
 client = TestClient(app, base_url="https://testserver")
 
-def test_health():
+@patch("services.shopify_oauth.main.get_connection")
+def test_health(mock_conn):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+@patch("services.shopify_oauth.main.get_connection", side_effect=Exception("DB down"))
+def test_health_unhealthy_when_db_down(mock_conn):
+    r = client.get("/health")
+    assert r.status_code == 503
+    assert r.json()["status"] == "unhealthy"
 
 def test_install_redirects_to_shopify():
     params = {"shop": "test-store.myshopify.com", "timestamp": str(int(time.time()))}

@@ -46,6 +46,15 @@ def startup():
 
 @app.get("/health")
 def health():
+    try:
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        finally:
+            conn.close()
+    except Exception:
+        return Response('{"status":"unhealthy","reason":"db"}', status_code=503, media_type="application/json")
     return {"status": "ok"}
 
 
