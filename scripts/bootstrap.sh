@@ -23,21 +23,21 @@ echo "[bootstrap] JWT token generated"
 
 CF="http://localhost:${CONTEXTFORGE_PORT:-4444}"
 
-# Register a backend MCP server with ContextForge via /servers endpoint
-# This endpoint auto-discovers tools from the backend (unlike /gateways)
+# Register a backend MCP server with ContextForge via /gateways endpoint
+# /gateways triggers tool auto-discovery; /servers is for virtual server composition only
 # Always re-registers to pick up URL/transport changes across deployments
-register_server() {
+register_gateway() {
   local name="$1" url="$2" transport="$3"
 
   # Delete any existing registration (stale URL/transport from previous deploy)
   local existing_id
   existing_id=$(curl -sf -H "Authorization: Bearer $TOKEN" \
-    "$CF/servers" 2>/dev/null | \
+    "$CF/gateways" 2>/dev/null | \
     jq -r ".[] | select(.name==\"$name\") | .id" 2>/dev/null) || true
   if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
     echo "[bootstrap] Deleting stale $name (id=$existing_id)"
     curl -sf -X DELETE -H "Authorization: Bearer $TOKEN" \
-      "$CF/servers/$existing_id" > /dev/null 2>&1 || true
+      "$CF/gateways/$existing_id" > /dev/null 2>&1 || true
   fi
 
   local max_attempts=3 attempt=1
@@ -45,13 +45,19 @@ register_server() {
     response=$(curl -s -w "\n%{http_code}" -X POST \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d "{\"server\":{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}}" \
-      "$CF/servers" 2>&1)
+      -d "{\"name\":\"$name\",\"url\":\"$url\",\"transport\":\"$transport\"}" \
+      "$CF/gateways" 2>&1)
     http_code=$(echo "$response" | tail -1)
     body=$(echo "$response" | head -n -1)
 
     if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-      echo "[bootstrap] Registered $name via /servers"
+      echo "[bootstrap] Registered $name via /gateways (tools auto-discovered)"
+      return 0
+    fi
+
+    # 409 = already exists
+    if [ "$http_code" -eq 409 ]; then
+      echo "[bootstrap] $name already exists (409)"
       return 0
     fi
 
@@ -76,7 +82,7 @@ for i in $(seq 1 60); do
 done
 
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
-register_server "apollo-shopify" "http://localhost:8000/sse" "sse"
+register_gateway "apollo-shopify" "http://localhost:8000/sse" "SSE"
 
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
 echo "[bootstrap] Waiting for dev-mcp bridge..."
@@ -87,7 +93,7 @@ for i in $(seq 1 90); do
 done
 
 echo "[bootstrap] Registering dev-mcp (Shopify docs)..."
-register_server "shopify-dev-mcp" "http://localhost:8003/sse" "sse"
+register_gateway "shopify-dev-mcp" "http://localhost:8003/sse" "SSE"
 
 # Wait for google-sheets bridge
 echo "[bootstrap] Waiting for google-sheets bridge..."
@@ -98,6 +104,9 @@ for i in $(seq 1 60); do
 done
 
 echo "[bootstrap] Registering google-sheets..."
-register_server "google-sheets" "http://localhost:8004/sse" "sse"
+register_gateway "google-sheets" "http://localhost:8004/sse" "SSE"
 
-echo "[bootstrap] All 3 backends registered"
+# Verify tools were discovered
+tool_count=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+  "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || tool_count=0
+echo "[bootstrap] All 3 backends registered, $tool_count tools discovered"
