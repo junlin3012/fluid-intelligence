@@ -963,6 +963,28 @@ else
 fi
 
 # =============================================
+# REVIEW ROUND 51: JWT secret not leaked via CLI args
+# =============================================
+echo "--- R51: JWT secret safety ---"
+
+# Neither primary nor fallback JWT generation should pass secrets via --secret $VARIABLE on the CLI
+# Both paths should use os.environ inside inline Python
+JWT_CLI_LEAK=$(grep -cE '^\s*--secret "\$' scripts/bootstrap.sh) || JWT_CLI_LEAK=0
+if [ "$JWT_CLI_LEAK" -eq 0 ]; then
+  pass "bootstrap.sh JWT generation passes secrets via env vars only"
+else
+  fail "bootstrap.sh JWT generation passes secrets via env vars only" "$JWT_CLI_LEAK paths leak secret via CLI arg"
+fi
+
+# Both JWT paths use inline Python with os.environ
+JWT_ENVIRON_COUNT=$(grep -c "os.environ\['SECRET_KEY'\]" scripts/bootstrap.sh) || JWT_ENVIRON_COUNT=0
+if [ "$JWT_ENVIRON_COUNT" -ge 2 ]; then
+  pass "Both JWT paths (primary + fallback) use os.environ for secret"
+else
+  fail "Both JWT paths use os.environ for secret" "found $JWT_ENVIRON_COUNT (expected 2)"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""

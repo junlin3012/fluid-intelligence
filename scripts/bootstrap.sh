@@ -12,11 +12,13 @@ from mcpgateway.utils.create_jwt_token import main
 main()
 " 2>/tmp/jwt-primary-err-$$.log) || {
   PRIMARY_ERR=$(cat /tmp/jwt-primary-err-$$.log 2>/dev/null)
-  # Fallback: try the module directly
-  TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \
-    --username "$PLATFORM_ADMIN_EMAIL" \
-    --exp 10 \
-    --secret "$JWT_SECRET_KEY" 2>/tmp/jwt-fallback-err-$$.log)
+  # Fallback: try the module directly (use env var to avoid secret in /proc/cmdline)
+  TOKEN=$(ADMIN_EMAIL="$PLATFORM_ADMIN_EMAIL" SECRET_KEY="$JWT_SECRET_KEY" python3 -c "
+import os, sys
+sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '10', '--secret', os.environ['SECRET_KEY']]
+from mcpgateway.utils.create_jwt_token import main
+main()
+" 2>/tmp/jwt-fallback-err-$$.log)
 }
 
 if [ -z "$TOKEN" ]; then
