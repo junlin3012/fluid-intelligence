@@ -1,12 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# Generate short-lived admin JWT for registration
+# Generate admin JWT for registration (10 min expiry to cover slow bridge starts:
+# worst case Apollo 60s + dev-mcp 90s + sheets 60s = 3.5 min of waiting)
 # Pass secrets via env vars to avoid shell injection (quotes in values would break inline Python)
 PRIMARY_ERR=""
 TOKEN=$(ADMIN_EMAIL="$PLATFORM_ADMIN_EMAIL" SECRET_KEY="$JWT_SECRET_KEY" /app/.venv/bin/python -c "
 import os, sys
-sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '5', '--secret', os.environ['SECRET_KEY']]
+sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '10', '--secret', os.environ['SECRET_KEY']]
 from mcpgateway.utils.create_jwt_token import main
 main()
 " 2>/tmp/jwt-primary-err.log) || {
@@ -14,7 +15,7 @@ main()
   # Fallback: try the module directly
   TOKEN=$(python3 -m mcpgateway.utils.create_jwt_token \
     --username "$PLATFORM_ADMIN_EMAIL" \
-    --exp 5 \
+    --exp 10 \
     --secret "$JWT_SECRET_KEY" 2>/tmp/jwt-fallback-err.log)
 }
 

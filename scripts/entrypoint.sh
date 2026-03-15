@@ -40,23 +40,32 @@ TOKEN_ENDPOINT="https://${SHOPIFY_STORE}/admin/oauth/access_token"
 echo "[fluid-intelligence] Fetching Shopify access token..."
 for attempt in 1 2 3 4 5; do
   # Pass credentials via stdin to avoid exposing SHOPIFY_CLIENT_SECRET in /proc/cmdline
+  # Capture HTTP status separately for diagnostics on failure
+  http_code=0
   response=$(printf 'grant_type=client_credentials&client_id=%s&client_secret=%s' \
     "$SHOPIFY_CLIENT_ID" "$SHOPIFY_CLIENT_SECRET" | \
-    curl -sf --max-time 15 -X POST "$TOKEN_ENDPOINT" \
+    curl -s -w "\n%{http_code}" --max-time 15 -X POST "$TOKEN_ENDPOINT" \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d @- 2>/dev/null) || true
+    -d @- 2>/tmp/shopify-curl-err.log) || true
   if [ -n "$response" ]; then
-    token=$(echo "$response" | jq -r '.access_token // empty')
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | sed '$d')
+    token=$(echo "$body" | jq -r '.access_token // empty' 2>/dev/null)
     if [ -n "$token" ]; then
       export SHOPIFY_ACCESS_TOKEN="$token"
       echo "[fluid-intelligence] Shopify token acquired (attempt $attempt)"
+      rm -f /tmp/shopify-curl-err.log
       break
     fi
   fi
   if [ "$attempt" -eq 5 ]; then
     echo "[fluid-intelligence] FATAL: Could not fetch Shopify access token after 5 attempts"
+    echo "[fluid-intelligence]   Last HTTP status: $http_code"
+    [ -f /tmp/shopify-curl-err.log ] && echo "[fluid-intelligence]   curl stderr: $(cat /tmp/shopify-curl-err.log)"
+    rm -f /tmp/shopify-curl-err.log
     exit 1
   fi
+  echo "[fluid-intelligence] Token attempt $attempt failed (HTTP $http_code)"
   sleep $((attempt * 2))
 done
 
@@ -110,6 +119,7 @@ python3 -m mcpgateway.translate \
   --port 8003 &
 TRANSLATE_DEVMCP_PID=$!
 PIDS+=("$TRANSLATE_DEVMCP_PID")
+start_and_verify "dev-mcp bridge" "$TRANSLATE_DEVMCP_PID"
 
 # 4. google-sheets bridge (stdio→SSE)
 python3 -m mcpgateway.translate \
@@ -118,6 +128,7 @@ python3 -m mcpgateway.translate \
   --port 8004 &
 TRANSLATE_SHEETS_PID=$!
 PIDS+=("$TRANSLATE_SHEETS_PID")
+start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 
 # --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
@@ -162,7 +173,7 @@ start_and_verify "auth-proxy" "$AUTHPROXY_PID"
 # 6. Bootstrap: register backends (foreground — fail fast if broken)
 echo "[fluid-intelligence] Running bootstrap..."
 /app/bootstrap.sh || {
-  echo "[fluid-intelligence] FATAL: bootstrap failed — no backends registered"
+  echo "[fluid-intelligence] FATAL: bootstrap failed — backend registration incomplete"
   for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   exit 1
 }
@@ -175,14 +186,19 @@ echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :8004"
 echo "  auth-proxy:     PID=$AUTHPROXY_PID  :8080"
 
 # --- Monitor: exit if any process dies ---
+# Disable set -e: wait -n returns error if a PID was already reaped (race condition)
+set +e
 wait -n "$APOLLO_PID" "$CONTEXTFORGE_PID" "$TRANSLATE_DEVMCP_PID" "$TRANSLATE_SHEETS_PID" "$AUTHPROXY_PID"
-EXIT_CODE=$?
+FIRST_EXIT=$?
+set -e
 
 for name_pid in "Apollo-bridge:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$TRANSLATE_DEVMCP_PID" "sheets:$TRANSLATE_SHEETS_PID" "auth-proxy:$AUTHPROXY_PID"; do
   name="${name_pid%%:*}"
   pid="${name_pid##*:}"
   if ! kill -0 "$pid" 2>/dev/null; then
-    echo "[fluid-intelligence] Process $name (PID $pid) died (exit $EXIT_CODE)"
+    # Get per-process exit code (wait returns 127 if already reaped)
+    wait "$pid" 2>/dev/null; pid_exit=$?
+    echo "[fluid-intelligence] Process $name (PID $pid) exited (code $pid_exit)"
   fi
 done
 
