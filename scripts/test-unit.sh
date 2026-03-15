@@ -464,9 +464,9 @@ echo "--- R6: CreateProduct variant input type ---"
 PROD_FILE="/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/products/CreateProduct.graphql"
 if [ -f "$PROD_FILE" ]; then
   if grep -q 'ProductVariantSetInput' "$PROD_FILE"; then
-    fail "CreateProduct uses correct variant type" "uses non-existent ProductVariantSetInput (should be ProductSetVariantInput)"
+    pass "CreateProduct uses correct variant type (ProductVariantSetInput)"
   else
-    pass "CreateProduct uses correct variant type"
+    fail "CreateProduct uses correct variant type" "should use ProductVariantSetInput (not ProductSetVariantInput which doesn't exist)"
   fi
 else
   fail "CreateProduct exists" "file not found"
@@ -479,10 +479,10 @@ echo "--- R6: CreateDiscountCode context field ---"
 
 DISC_FILE="/Users/junlin/Projects/Shopify/fluid-intelligence/graphql/orders/CreateDiscountCode.graphql"
 if [ -f "$DISC_FILE" ]; then
-  if grep -q 'context' "$DISC_FILE"; then
-    fail "CreateDiscountCode has no invalid context field" "uses non-existent 'context' field (should be customerSelection)"
+  if grep -q 'customerSelection' "$DISC_FILE"; then
+    fail "CreateDiscountCode uses context (not deprecated customerSelection)" "still using deprecated customerSelection"
   else
-    pass "CreateDiscountCode has no invalid context field"
+    pass "CreateDiscountCode uses context (not deprecated customerSelection)"
   fi
 else
   fail "CreateDiscountCode exists" "file not found"

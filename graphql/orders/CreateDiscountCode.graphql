@@ -21,8 +21,8 @@ mutation CreateDiscountCode(
         }
       }
       appliesOncePerCustomer: $appliesOncePerCustomer
-      customerSelection: {
-        all: true
+      context: {
+        all: ALL
       }
     }
   ) {
