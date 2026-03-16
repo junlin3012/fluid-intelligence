@@ -101,8 +101,31 @@ This is the `mcp.client.sse.sse_client` — it opens a **real SSE event stream**
 2. Check ContextForge's `initialize_timeout` parameter — it may not be set, causing infinite wait
 3. Consider setting `FEDERATION_TIMEOUT` env var to bound the hang
 
-## Resolution Plan
+## Update: Root Cause CONFIRMED (2026-03-16 research + FEDERATION_TIMEOUT)
 
-1. Set `FEDERATION_TIMEOUT=60` in cloudbuild env vars to bound gateway initialization
-2. Test if registration completes within that timeout
-3. If still failing, investigate translate bridge SSE event stream compatibility with mcp library client
+After adding `FEDERATION_TIMEOUT=60`, the registration no longer hangs — it fails fast with:
+
+```
+Error: Failed to initialize MCP server
+Caused by: expect initialized notification, but received: Some(Request(InitializeRequest(...)))
+```
+
+**The exact bug:** The translate bridge initializes its stdio subprocess (Apollo) during bridge startup. When ContextForge later opens an SSE session and sends its own `initialize` request, the bridge forwards this to Apollo's stdin. But Apollo already completed its MCP handshake with the bridge and now expects `notifications/initialized` — not a second `initialize` request.
+
+**Protocol violation:** MCP stdio transport is 1:1 (one client per subprocess). The translate bridge acts as the first client (initializes on startup). ContextForge tries to be a second client via SSE. But the bridge multiplexes multiple SSE sessions onto one subprocess stdin/stdout, so the second `initialize` collides with the first session's state.
+
+**This is a ContextForge translate bridge design limitation, not a configuration error.**
+
+## Resolution Plan (Updated)
+
+### Option E: Don't use translate bridge for Apollo (RECOMMENDED)
+Apollo v1.9.0 supports `streamable_http` natively. If we can make ContextForge's streamable_http client work (or fix the previously noted bug), we bypass the translate bridge entirely. Apollo would handle its own MCP protocol lifecycle.
+
+### Option F: Register gateway WITHOUT tool discovery
+Register the gateway with a `mode` that skips automatic tool discovery, then manually add tools via the API. ContextForge may support a `passive` or `manual` gateway mode.
+
+### Option G: Patch translate bridge to handle re-initialization
+The bridge should detect a new SSE session's `initialize` request and either (a) create a new subprocess, or (b) fake the response from cached capabilities without forwarding to the subprocess.
+
+### Option H: Use catalog file instead of /gateways
+Bootstrap could write tools to the ContextForge catalog directly via the admin API (`POST /tools`) instead of registering gateways. This bypasses the SSE discovery entirely.
