@@ -195,6 +195,9 @@ register_gateway "google-sheets" "http://127.0.0.1:8004/sse" "SSE"
 
 # Verify tools discovered — poll until count stabilizes (async discovery race)
 echo "[bootstrap] All 3 backends registered, waiting for tool discovery..."
+# Minimum expected tool count: Apollo ~7 + dev-mcp ~50+ + sheets ~17 = ~74
+# Use conservative floor of 70 to catch broken backend registrations
+MIN_TOOL_COUNT=${MIN_TOOL_COUNT:-70}
 prev_count=-1
 stable=0
 for i in $(seq 1 30); do
@@ -210,8 +213,11 @@ for i in $(seq 1 30); do
   sleep 2
 done
 echo "[bootstrap] $TOOL_COUNT tools in catalog (stabilized after $((i * 2))s)"
-if [ "$TOOL_COUNT" -eq 0 ]; then
-  echo "[bootstrap] WARNING: Zero tools discovered — check backend registrations above"
+if [ "$TOOL_COUNT" -lt "$MIN_TOOL_COUNT" ]; then
+  echo "[bootstrap] WARNING: Only $TOOL_COUNT tools discovered (expected >= $MIN_TOOL_COUNT)"
+  echo "[bootstrap]   This suggests a backend failed to register or tool discovery is incomplete"
+  echo "[bootstrap]   Expected: Apollo ~7 + dev-mcp ~50+ + sheets ~17 = ~74+"
+  # Don't exit — partial service is better than no service. But log loudly.
 fi
 
 # --- Create virtual server bundling ALL discovered tools ---
