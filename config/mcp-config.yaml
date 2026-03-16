@@ -38,7 +38,6 @@ introspection:
 headers:
   X-Shopify-Access-Token: ${env.SHOPIFY_ACCESS_TOKEN}
 
-# Request timeout for Shopify API calls (prevents silent hangs).
-# Note: Verify Apollo v1.9.0 supports this key. If ignored, Shopify's
-# own server-side timeout (~30s) provides a natural bound.
-timeout: 30
+# Apollo v1.9.0 does NOT support a timeout key — it crashes on startup with:
+#   "unknown field: found `timeout`"
+# Shopify's server-side timeout (~30s) provides a natural bound instead.
