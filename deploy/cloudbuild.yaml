@@ -27,5 +27,8 @@ steps:
       - '--set-env-vars=SHOPIFY_STORE=junlinleather-5148.myshopify.com,SHOPIFY_API_VERSION=2026-01,PLATFORM_ADMIN_EMAIL=admin@junlinleather.com,EXTERNAL_URL=fluid-intelligence-1056128102929.asia-southeast1.run.app,GOOGLE_ALLOWED_USERS=ourteam@junlinleather.com,DB_USER=contextforge,DB_NAME=contextforge,HOST=0.0.0.0,MCPGATEWAY_PORT=4444,MCG_PORT=4444,MCG_HOST=0.0.0.0,GUNICORN_WORKERS=1,HTTP_SERVER=gunicorn,MCPGATEWAY_UI_ENABLED=false,MCPGATEWAY_ADMIN_API_ENABLED=true,TRANSPORT_TYPE=all,SSRF_PROTECTION_ENABLED=true,SSRF_ALLOW_LOCALHOST=true,SSRF_ALLOW_PRIVATE_NETWORKS=true,AUTH_REQUIRED=false,CACHE_TYPE=database,PYTHONUNBUFFERED=1,DB_POOL_SIZE=5,OTEL_EXPORTER_OTLP_ENDPOINT=https://cloudtrace.googleapis.com,OTEL_SERVICE_NAME=fluid-intelligence,OTEL_TRACES_EXPORTER=otlp,OTEL_METRICS_EXPORTER=none'
       - '--allow-unauthenticated'
 
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 substitutions:
   _IMAGE: 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intelligence:latest'
