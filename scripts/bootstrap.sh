@@ -145,13 +145,10 @@ for i in $(seq 1 60); do
       exit 1
     fi
   fi
-  # Apollo streamable_http serves on /mcp — check if it responds
-  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/mcp -o /dev/null 2>&1 || rc=$?
-  # Accept any HTTP response (even 405 Method Not Allowed) as "server is up"
+  # Apollo streamable_http: check if port 8000 accepts connections
+  # Use -s (no -f) so any HTTP response = server is up (even 404/405)
+  rc=0; curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/mcp 2>/dev/null || rc=$?
   [ "$rc" -eq 0 ] && break
-  # Also try just connecting to the port
-  rc2=0; curl -sf --connect-timeout 2 --max-time 1 http://127.0.0.1:8000/ -o /dev/null 2>&1 || rc2=$?
-  [ "$rc2" -eq 0 ] && break
   [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
 done
