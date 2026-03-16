@@ -188,18 +188,15 @@ start_and_verify() {
 
 # --- Start services ---
 
-# 1. Apollo MCP Server (Rust, Shopify GraphQL) — via stdio→SSE bridge
-# Apollo only supports stdio or streamable_http transports.
-# ContextForge's MCP client has a bug with streamable_http, so we use stdio
-# and bridge it to SSE via mcpgateway.translate (same pattern as dev-mcp/sheets).
-/app/.venv/bin/python -m mcpgateway.translate \
-  --stdio "apollo /app/mcp-config.yaml" \
-  --expose-sse \
-  --port 8000 &
+# 1. Apollo MCP Server (Rust, Shopify GraphQL) — native streamable_http
+# Apollo serves MCP directly on port 8000, no translate bridge needed.
+# Previously used stdio→SSE bridge but that caused double-initialize on the
+# MCP subprocess (Issue #001). Direct HTTP avoids the multiplexing problem.
+apollo /app/mcp-config.yaml &
 APOLLO_PID=$!
 PIDS+=("$APOLLO_PID")
 echo "$APOLLO_PID" > /tmp/apollo.pid
-start_and_verify "Apollo bridge" "$APOLLO_PID"
+start_and_verify "Apollo" "$APOLLO_PID"
 
 # 2. IBM ContextForge (Python, gateway core)
 # The `mcpgateway` entry point and `python -m mcpgateway` both fail at runtime.

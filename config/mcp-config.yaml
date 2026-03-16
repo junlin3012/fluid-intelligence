@@ -12,7 +12,9 @@
 endpoint: https://${env.SHOPIFY_STORE}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json
 
 transport:
-  type: stdio
+  type: streamable_http
+  address: 0.0.0.0
+  port: 8000
 
 schema:
   source: local

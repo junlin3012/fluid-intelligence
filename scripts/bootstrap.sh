@@ -134,61 +134,31 @@ register_gateway() {
   return 1
 }
 
-# Wait for Apollo bridge before registering it
-# SSE endpoint is streaming (never completes), so check TCP + HTTP response
-# Check PID files written by entrypoint.sh to fast-fail if bridge crashes
-echo "[bootstrap] Waiting for Apollo bridge..."
+# Wait for Apollo (native streamable_http on port 8000)
+# Apollo serves MCP directly — no translate bridge. Check /mcp endpoint.
+echo "[bootstrap] Waiting for Apollo..."
 for i in $(seq 1 60); do
-  # Fast-fail: check if bridge process is still alive (PID file from entrypoint)
   if [ -f /tmp/apollo.pid ]; then
-    BRIDGE_PID=$(cat /tmp/apollo.pid 2>/dev/null)
-    if [ -n "$BRIDGE_PID" ] && [[ "$BRIDGE_PID" =~ ^[0-9]+$ ]] && ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
-      echo "[bootstrap] FATAL: Apollo bridge process (PID $BRIDGE_PID) crashed"
+    APOLLO_PID_CHECK=$(cat /tmp/apollo.pid 2>/dev/null)
+    if [ -n "$APOLLO_PID_CHECK" ] && [[ "$APOLLO_PID_CHECK" =~ ^[0-9]+$ ]] && ! kill -0 "$APOLLO_PID_CHECK" 2>/dev/null; then
+      echo "[bootstrap] FATAL: Apollo process (PID $APOLLO_PID_CHECK) crashed"
       exit 1
     fi
   fi
-  # curl exit 28 = timeout (connected but SSE stream) = success
-  rc=0; curl -s --connect-timeout 2 --max-time 1 http://127.0.0.1:8000/sse -o /dev/null 2>&1 || rc=$?
-  [ "$rc" -eq 0 ] || [ "$rc" -eq 28 ] && break
-  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo bridge not ready after 60s (last curl rc=$rc)"; exit 1; }
+  # Apollo streamable_http serves on /mcp — check if it responds
+  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/mcp -o /dev/null 2>&1 || rc=$?
+  # Accept any HTTP response (even 405 Method Not Allowed) as "server is up"
+  [ "$rc" -eq 0 ] && break
+  # Also try just connecting to the port
+  rc2=0; curl -sf --connect-timeout 2 --max-time 1 http://127.0.0.1:8000/ -o /dev/null 2>&1 || rc2=$?
+  [ "$rc2" -eq 0 ] && break
+  [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
 done
 
-# Verify Apollo subprocess is actually handling MCP messages (not just HTTP server up).
-# The translate bridge reports "ready" when its HTTP server starts, but the stdio subprocess
-# (Apollo binary parsing 98K-line schema) may still be initializing. Send an MCP initialize
-# handshake through the bridge's /message endpoint to confirm end-to-end readiness.
-echo "[bootstrap] Verifying Apollo subprocess is ready for MCP messages..."
-apollo_mcp_ready=0
-for i in $(seq 1 30); do
-  # Open an SSE session — the first event contains the session endpoint URL
-  # || true: curl may timeout (28) or fail; head causes SIGPIPE; pipefail would kill script
-  session_resp=$(curl -s --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/sse 2>/dev/null || true)
-  session_id=$(echo "$session_resp" | grep -o 'session_id=[^&[:space:]]*' 2>/dev/null | head -1 | cut -d= -f2 || true)
-  if [ -n "$session_id" ]; then
-    # Try sending an MCP initialize request through the bridge
-    init_http=0
-    init_resp=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
-      "http://127.0.0.1:8000/message?session_id=$session_id" \
-      -H "Content-Type: application/json" \
-      -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bootstrap","version":"1.0"}},"id":1}' \
-      2>/dev/null) || true
-    init_http=$(echo "$init_resp" | tail -1)
-    [[ "$init_http" =~ ^[0-9]+$ ]] || init_http=0
-    if [ "$init_http" -ge 200 ] && [ "$init_http" -lt 300 ]; then
-      echo "[bootstrap] Apollo subprocess ready (MCP initialize succeeded after $((i * 2))s)"
-      apollo_mcp_ready=1
-      break
-    fi
-    echo "[bootstrap] Apollo MCP probe attempt $i: HTTP $init_http (subprocess not ready yet)"
-  fi
-  sleep 2
-done
-[ "$apollo_mcp_ready" -eq 0 ] && echo "[bootstrap] WARNING: Apollo subprocess not responding to MCP after 60s — registration may fail"
-
 check_contextforge
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
-register_gateway "apollo-shopify" "http://127.0.0.1:8000/sse" "SSE"
+register_gateway "apollo-shopify" "http://127.0.0.1:8000/mcp" "STREAMABLEHTTP"
 
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
 # healthz only checks the bridge HTTP server, not the underlying MCP subprocess.
