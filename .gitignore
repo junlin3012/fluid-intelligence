@@ -8,8 +8,9 @@
 data/
 *.db
 
-# Schema (98K lines, regeneratable via Apollo introspection)
-shopify-schema.graphql
+# Schema — kept in repo for Cloud Build (Dockerfile COPYs it)
+# Regenerate: Apollo introspection against Shopify Admin API
+# shopify-schema.graphql
 
 # IDE
 .idea/
