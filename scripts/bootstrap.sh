@@ -50,10 +50,14 @@ echo "[bootstrap] JWT token generated"
 # flock is non-blocking (-n): if lock is held, exit 0 (let the other instance finish).
 # Lock is automatically released when the process exits (including SIGTERM).
 BOOTSTRAP_LOCK="/tmp/bootstrap.lock"
-exec 9>"$BOOTSTRAP_LOCK"
-if ! flock -n 9; then
-  echo "[bootstrap] Another instance is running bootstrap — skipping (flock held)"
-  exit 0
+if ! command -v flock >/dev/null 2>&1; then
+  echo "[bootstrap] WARNING: flock not available — skipping advisory lock (install util-linux)"
+else
+  exec 9>"$BOOTSTRAP_LOCK"
+  if ! flock -n 9; then
+    echo "[bootstrap] Another instance is running bootstrap — skipping (flock held)"
+    exit 0
+  fi
 fi
 # Lock acquired — fd 9 stays open for the lifetime of this script
 
