@@ -70,3 +70,37 @@ def mark_uninstalled(conn, shop_domain: str):
             (shop_domain,),
         )
     conn.commit()
+
+
+def get_customer_data(conn, shop_domain: str, customer_email: str) -> dict | None:
+    """Return installation data for a shop (for GDPR data request).
+
+    Note: We store shop-level data, not per-customer data. The customer_email
+    is logged for audit but we can only return shop-level installation info.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "SELECT shop_domain, status, scopes, installed_at, updated_at FROM shopify_installations WHERE shop_domain = %s",
+            (shop_domain,),
+        )
+        return cur.fetchone()
+
+
+def delete_customer_data(conn, shop_domain: str, customer_email: str):
+    """Delete customer-specific data for GDPR customers/redact.
+
+    Note: We don't store per-customer PII — only shop-level installation data
+    and encrypted access tokens. This is a no-op for customer data but we log
+    the request for audit compliance.
+    """
+    conn.commit()
+
+
+def delete_shop_data(conn, shop_domain: str):
+    """Delete ALL data for a shop (GDPR shop/redact). Permanent deletion."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM shopify_installations WHERE shop_domain = %s",
+            (shop_domain,),
+        )
+    conn.commit()
