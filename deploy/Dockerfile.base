@@ -30,7 +30,7 @@ FROM ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
 USER root
 
 # System packages (nodejs for dev-mcp, npm for npx, curl/jq for bootstrap)
-RUN microdnf install -y nodejs npm curl jq tar gzip && microdnf clean all
+RUN microdnf install -y nodejs npm curl jq tar gzip util-linux && microdnf clean all
 
 # uv (standalone binary — for mcp-google-sheets)
 ARG UV_VERSION=0.10.10

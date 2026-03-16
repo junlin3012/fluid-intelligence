@@ -235,14 +235,15 @@ echo "$TRANSLATE_SHEETS_PID" > /tmp/sheets.pid
 start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 
 # Verify google-sheets SSE endpoint is responding (not just the HTTP server)
-# Same pattern as dev-mcp — wait up to 30s for /sse to accept connections
+# SSE endpoints stream forever — curl exits 28 (timeout), not 0. Accept both.
 for probe_attempt in $(seq 1 15); do
-  if curl -sf --connect-timeout 2 --max-time 3 "http://127.0.0.1:8004/sse" -o /dev/null 2>/dev/null; then
+  probe_rc=0; curl -s --connect-timeout 2 --max-time 3 "http://127.0.0.1:8004/sse" -o /dev/null 2>/dev/null || probe_rc=$?
+  if [ "$probe_rc" -eq 0 ] || [ "$probe_rc" -eq 28 ]; then
     echo "[fluid-intelligence] sheets SSE endpoint ready [+$(elapsed)s]"
     break
   fi
   if [ "$probe_attempt" -eq 15 ]; then
-    echo "[fluid-intelligence] WARNING: sheets SSE endpoint not responding after 30s"
+    echo "[fluid-intelligence] WARNING: sheets SSE endpoint not responding after 30s (last curl rc=$probe_rc)"
   fi
   sleep 2
 done
