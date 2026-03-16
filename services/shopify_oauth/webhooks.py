@@ -9,7 +9,7 @@ import logging
 from fastapi import APIRouter, Request, Response
 
 from services.shopify_oauth.config import settings
-from services.shopify_oauth.db import get_connection, mark_uninstalled
+from services.shopify_oauth.db import get_connection, mark_uninstalled, get_customer_data, delete_customer_data, delete_shop_data
 
 log = logging.getLogger("shopify-oauth")
 router = APIRouter()
@@ -68,11 +68,37 @@ async def gdpr_webhook(topic: str, request: Request):
         data = json.loads(body)
     except (json.JSONDecodeError, ValueError):
         return Response("Invalid JSON", status_code=400)
-    log.info(f"GDPR webhook received: {topic}")
 
-    if topic == "shop-redact":
-        shop_domain = data.get("shop_domain", "")
-        if shop_domain:
-            mark_shop_uninstalled(shop_domain)
+    shop_domain = data.get("shop_domain", "")
+    customer = data.get("customer", {})
+    customer_email = customer.get("email", "") if isinstance(customer, dict) else ""
+
+    log.info(f"GDPR webhook received: {topic} for shop={shop_domain}")
+
+    try:
+        conn = get_connection()
+        try:
+            if topic == "customers-data_request":
+                result = get_customer_data(conn, shop_domain, customer_email)
+                log.info(f"GDPR data request: shop={shop_domain}, customer={customer_email}, data_found={result is not None}")
+
+            elif topic == "customers-redact":
+                delete_customer_data(conn, shop_domain, customer_email)
+                log.info(f"GDPR customer redact: shop={shop_domain}, customer={customer_email}")
+
+            elif topic == "shop-redact":
+                # Permanent deletion — unlike mark_uninstalled (soft delete),
+                # this hard DELETEs the record for GDPR compliance
+                delete_shop_data(conn, shop_domain)
+                log.info(f"GDPR shop redact: permanently deleted shop={shop_domain}")
+
+            else:
+                log.warning(f"Unknown GDPR topic: {topic}")
+        finally:
+            conn.close()
+    except Exception as e:
+        log.error(f"GDPR webhook {topic} failed for shop={shop_domain}: {e}")
+        # Return 200 anyway — Shopify retries on non-200, and we don't want
+        # infinite retries on transient DB errors. Log for manual follow-up.
 
     return {"status": "ok"}
