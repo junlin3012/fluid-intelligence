@@ -154,6 +154,34 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+# Verify Apollo subprocess is actually handling MCP messages (not just HTTP server up).
+# The translate bridge reports "ready" when its HTTP server starts, but the stdio subprocess
+# (Apollo binary parsing 98K-line schema) may still be initializing. Send an MCP initialize
+# handshake through the bridge's /message endpoint to confirm end-to-end readiness.
+echo "[bootstrap] Verifying Apollo subprocess is ready for MCP messages..."
+for i in $(seq 1 30); do
+  # Open an SSE session and send initialize via /message
+  # The SSE endpoint returns a session_id in the first event
+  session_resp=$(curl -s --connect-timeout 2 --max-time 3 http://127.0.0.1:8000/sse 2>/dev/null | head -3)
+  session_id=$(echo "$session_resp" | grep -oP 'session_id=\K[^&\s]+' 2>/dev/null || true)
+  if [ -n "$session_id" ]; then
+    # Try sending an MCP initialize request
+    init_rc=0
+    init_resp=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+      "http://127.0.0.1:8000/message?session_id=$session_id" \
+      -H "Content-Type: application/json" \
+      -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bootstrap","version":"1.0"}},"id":1}' \
+      2>/dev/null) || init_rc=$?
+    init_http=$(echo "$init_resp" | tail -1)
+    if [ "$init_http" = "200" ] || [ "$init_http" = "202" ]; then
+      echo "[bootstrap] Apollo subprocess ready (MCP initialize succeeded after ${i}s)"
+      break
+    fi
+  fi
+  [ "$i" -eq 30 ] && echo "[bootstrap] WARNING: Apollo subprocess not responding to MCP after 30s — registration may fail"
+  sleep 2
+done
+
 check_contextforge
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
 register_gateway "apollo-shopify" "http://127.0.0.1:8000/sse" "SSE"
