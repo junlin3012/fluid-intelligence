@@ -1,18 +1,18 @@
 #!/bin/bash
-# Test: bootstrap.sh must contain advisory lock logic
+# Test: bootstrap.sh must contain concurrency lock logic
 
-if grep -q 'pg_try_advisory_lock' scripts/bootstrap.sh; then
-  echo "PASS: bootstrap.sh has advisory lock"
+if grep -q 'flock' scripts/bootstrap.sh; then
+  echo "PASS: bootstrap.sh has flock-based concurrency lock"
 else
-  echo "FAIL: bootstrap.sh missing advisory lock"
+  echo "FAIL: bootstrap.sh missing concurrency lock"
   exit 1
 fi
 
-# Check it uses env vars, not hardcoded paths only
-if grep -q 'DATABASE_URL\|DB_HOST' scripts/bootstrap.sh; then
-  echo "PASS: advisory lock uses env vars for DB connection"
+# Verify non-blocking mode (-n flag)
+if grep -q 'flock -n' scripts/bootstrap.sh; then
+  echo "PASS: flock uses non-blocking mode"
 else
-  echo "FAIL: advisory lock may have hardcoded DB path"
+  echo "FAIL: flock should use -n (non-blocking)"
   exit 1
 fi
-echo "All advisory lock checks passed"
+echo "All concurrency lock checks passed"

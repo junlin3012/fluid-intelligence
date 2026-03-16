@@ -46,37 +46,16 @@ if ! [[ "$TOKEN" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
 fi
 echo "[bootstrap] JWT token generated"
 
-# Advisory lock: prevent concurrent bootstrap from multiple instances
-# Uses PostgreSQL pg_try_advisory_lock with a fixed lock ID
-# Lock is session-scoped and auto-releases when connection closes
-LOCK_ACQUIRED=$(/app/.venv/bin/python3 -c "
-import os, psycopg2
-# Use DATABASE_URL if available (set by entrypoint.sh), fall back to individual vars
-dsn = os.environ.get('DATABASE_URL', '')
-if dsn:
-    conn = psycopg2.connect(dsn, connect_timeout=5)
-else:
-    conn = psycopg2.connect(
-        dbname=os.environ.get('DB_NAME', 'contextforge'),
-        user=os.environ.get('DB_USER', 'contextforge'),
-        password=os.environ.get('DB_PASSWORD', ''),
-        host=os.environ.get('DB_HOST', '/cloudsql/junlinleather-mcp:asia-southeast1:contextforge'),
-        connect_timeout=5,
-    )
-cur = conn.cursor()
-cur.execute('SELECT pg_try_advisory_lock(42)')  # 42 = bootstrap lock ID
-acquired = cur.fetchone()[0]
-print('true' if acquired else 'false')
-if not acquired:
-    conn.close()
-" 2>/dev/null) || LOCK_ACQUIRED="error"
-
-if [ "$LOCK_ACQUIRED" = "false" ]; then
-  echo "[bootstrap] Another instance is running bootstrap — skipping (advisory lock held)"
+# File lock: prevent concurrent bootstrap from multiple instances or restarts.
+# flock is non-blocking (-n): if lock is held, exit 0 (let the other instance finish).
+# Lock is automatically released when the process exits (including SIGTERM).
+BOOTSTRAP_LOCK="/tmp/bootstrap.lock"
+exec 9>"$BOOTSTRAP_LOCK"
+if ! flock -n 9; then
+  echo "[bootstrap] Another instance is running bootstrap — skipping (flock held)"
   exit 0
-elif [ "$LOCK_ACQUIRED" = "error" ]; then
-  echo "[bootstrap] WARNING: Could not acquire advisory lock (DB unavailable?) — proceeding anyway"
 fi
+# Lock acquired — fd 9 stays open for the lifetime of this script
 
 CF="http://127.0.0.1:${CONTEXTFORGE_PORT:-4444}"
 
