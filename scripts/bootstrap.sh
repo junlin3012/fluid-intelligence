@@ -11,7 +11,7 @@ parse_http_code() {
 }
 
 # Generate admin JWT for registration (10 min expiry to cover slow bridge starts:
-# worst case Apollo 60s + dev-mcp 90s + sheets 60s = 3.5 min of waiting)
+# worst case Apollo 60s + dev-mcp 120s + sheets 60s + convergence 60s = 5 min of waiting)
 # Pass secrets via env vars to avoid shell injection (quotes in values would break inline Python)
 PRIMARY_ERR=""
 TOKEN=$(ADMIN_EMAIL="$PLATFORM_ADMIN_EMAIL" SECRET_KEY="$JWT_SECRET_KEY" /app/.venv/bin/python -c "
@@ -223,7 +223,11 @@ for i in $(seq 1 30); do
   prev_count=$TOOL_COUNT
   sleep 2
 done
-echo "[bootstrap] $TOOL_COUNT tools in catalog (stabilized after $((i * 2))s)"
+if [ "$stable" -ge 2 ]; then
+  echo "[bootstrap] $TOOL_COUNT tools in catalog (stabilized after $((i * 2))s)"
+else
+  echo "[bootstrap] $TOOL_COUNT tools in catalog (did NOT stabilize after $((i * 2))s)"
+fi
 if [ "$TOOL_COUNT" -lt "$MIN_TOOL_COUNT" ]; then
   echo "[bootstrap] WARNING: Only $TOOL_COUNT tools discovered (expected >= $MIN_TOOL_COUNT)"
   echo "[bootstrap]   This suggests a backend failed to register or tool discovery is incomplete"

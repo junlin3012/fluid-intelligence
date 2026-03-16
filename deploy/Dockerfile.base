@@ -29,7 +29,8 @@ FROM ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
 
 USER root
 
-# System packages (nodejs for dev-mcp, npm for npx, curl/jq for bootstrap)
+# System packages (nodejs for dev-mcp, npm for npx, curl/jq for bootstrap,
+# util-linux for flock advisory lock, tar/gzip for uv install)
 RUN microdnf install -y nodejs npm curl jq tar gzip util-linux && microdnf clean all
 
 # uv (standalone binary — for mcp-google-sheets)
