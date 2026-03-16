@@ -95,7 +95,7 @@ register_gateway() {
     done
   fi
 
-  local max_attempts=3 attempt=1 http_code=0 payload response body
+  local max_attempts=6 attempt=1 http_code=0 payload response body
   while [ "$attempt" -le "$max_attempts" ]; do
     payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
       '{name: $n, url: $u, transport: $t}')
@@ -121,10 +121,11 @@ register_gateway() {
       return 0
     fi
 
-    echo "[bootstrap] $name registration failed (HTTP $http_code): $(echo "$body" | head -c 200)"
+    echo "[bootstrap] $name registration attempt $attempt/$max_attempts failed (HTTP $http_code): $(echo "$body" | head -c 200)"
     [ -s "$curl_err" ] && echo "[bootstrap]   curl error: $(cat "$curl_err")"
     attempt=$((attempt + 1))
-    sleep "$attempt"
+    # Exponential backoff: 5s, 10s, 15s, 20s, 25s — gives subprocess time to initialize
+    sleep "$((attempt * 5))"
   done
 
   echo "[bootstrap] FATAL: Failed to register $name after $max_attempts attempts (last HTTP $http_code): $(echo "$body" | head -c 200)"
