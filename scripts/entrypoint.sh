@@ -77,7 +77,14 @@ if [ -z "$encoded_pw" ]; then
   exit 1
 fi
 export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
-export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
+# Use dedicated secret for ContextForge DB encryption (decoupled from JWT signing key).
+# Fall back to JWT_SECRET_KEY for backward compat during migration.
+if [ -n "${AUTH_ENCRYPTION_SECRET:-}" ]; then
+  export AUTH_ENCRYPTION_SECRET
+else
+  echo "[fluid-intelligence] WARNING: AUTH_ENCRYPTION_SECRET not set, falling back to JWT_SECRET_KEY (DEPRECATED — set AUTH_ENCRYPTION_SECRET separately)"
+  export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
+fi
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
 export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
 
