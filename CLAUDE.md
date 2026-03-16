@@ -24,7 +24,7 @@ Before writing code, agents MUST read:
 ├── deploy/          Infrastructure (Dockerfile, Cloud Build configs)
 ├── scripts/         Runtime scripts (entrypoint.sh, bootstrap.sh)
 ├── config/          Service configuration (mcp-config.yaml)
-├── graphql/         Shopify GraphQL operations (17 .graphql files)
+├── graphql/         Shopify GraphQL operations (30 .graphql files)
 ├── docs/            Architecture, runbook, research, specs, plans
 │   ├── architecture.md     System overview
 │   ├── runbook.md          Operations guide

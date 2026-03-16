@@ -105,8 +105,8 @@ Add to `~/.claude.json` under `mcpServers`:
 | Gateway | IBM ContextForge | 1.0.0-RC-2 | MCP aggregation, RBAC, audit |
 | Auth | mcp-auth-proxy | v2.5.4 | OAuth 2.1, Google login |
 | Shopify API | Apollo MCP Server | v1.9.0 | GraphQL operations |
-| Shopify Docs | @shopify/dev-mcp | latest | Docs + schema |
-| Sheets | mcp-google-sheets | latest | Google Sheets |
+| Shopify Docs | @shopify/dev-mcp | v1.7.1 | Docs + schema |
+| Sheets | mcp-google-sheets | v0.6.0 | Google Sheets |
 | Database | Cloud SQL PostgreSQL | - | Persistent state |
 | Runtime | Google Cloud Run | - | asia-southeast1 |
 
