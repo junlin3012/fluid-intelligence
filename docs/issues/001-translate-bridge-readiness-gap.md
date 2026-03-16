@@ -75,6 +75,34 @@ Add subprocess readiness check to the bridge — wait for first successful MCP h
 ### D. Use streamable_http transport instead of SSE
 Apollo v1.9.0 supports `streamable_http`. If ContextForge's client works with it, bypass the translate bridge entirely. Previously noted: "ContextForge's MCP client has a bug with streamable_http."
 
+## Update: Root Cause Refined (2026-03-16 research)
+
+### The Apollo config crash was the PRIMARY cause
+The `timeout: 30` key in mcp-config.yaml was unsupported by Apollo v1.9.0, causing immediate crash. The ConnectionResetError was a dead subprocess, not a readiness gap. **FIXED.**
+
+### The registration STILL hangs after Apollo fix
+After fixing the config crash, Apollo responds to MCP initialize (our probe succeeds). But ContextForge's `/gateways` POST still hangs for 60+s.
+
+### Root cause: ContextForge uses MCP SSE client, not HTTP POST
+Reading ContextForge source (`gateway_service.py:4868-4930`), registration calls:
+```python
+async with sse_client(url=server_url) as streams:
+    async with ClientSession(*streams) as session:
+        response = await session.initialize()
+        response = await session.list_tools()
+```
+
+This is the `mcp.client.sse.sse_client` — it opens a **real SSE event stream**, not our `/message` HTTP POST endpoint. The translate bridge serves both, but they're different code paths. Our curl probe hits `/message` (works), but ContextForge's SSE client opens `/sse` and reads the event stream (may hang).
+
+**The mismatch:** Our bootstrap probe verifies `/message` works, but ContextForge uses the SSE event stream path. These may have different readiness states in the translate bridge.
+
+### Next steps
+1. Check if the translate bridge's SSE event stream works correctly when Apollo is alive
+2. Check ContextForge's `initialize_timeout` parameter — it may not be set, causing infinite wait
+3. Consider setting `FEDERATION_TIMEOUT` env var to bound the hang
+
 ## Resolution Plan
 
-Implement Option A first (quick, within our control). File upstream issue for Option C.
+1. Set `FEDERATION_TIMEOUT=60` in cloudbuild env vars to bound gateway initialization
+2. Test if registration completes within that timeout
+3. If still failing, investigate translate bridge SSE event stream compatibility with mcp library client
