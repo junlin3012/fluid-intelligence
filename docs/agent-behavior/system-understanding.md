@@ -15,16 +15,15 @@ Fluid Intelligence is a multi-process container running on Google Cloud Run. One
 Cloud Run container (:8080 exposed)
 ├── tini (PID 1, init process)
 └── entrypoint.sh (orchestrator)
-    ├── 1. Apollo bridge (Rust→stdio→SSE)   :8000  — Shopify GraphQL ops
+    ├── 1. Apollo (Rust, streamable_http)    :8000  — Shopify GraphQL ops
     ├── 2. ContextForge (Python/FastAPI)    :4444  — MCP gateway core
     ├── 3. dev-mcp bridge (Node→stdio→SSE)  :8003  — Shopify docs
     ├── 4. sheets bridge (Python→stdio→SSE) :8004  — Google Sheets
     └── 5. mcp-auth-proxy (Go)             :8080  — OAuth 2.1 front door
 ```
 
-All three backends (Apollo, dev-mcp, sheets) run as stdio processes bridged to SSE
-via `mcpgateway.translate`. This is required because ContextForge's MCP client has
-a bug with the `streamable_http` transport.
+Apollo runs natively with `streamable_http` transport on port 8000 (no bridge).
+dev-mcp and sheets run as stdio processes bridged to SSE via `mcpgateway.translate`.
 
 Traffic flow: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backends`
 
@@ -46,7 +45,11 @@ Traffic flow: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backen
 | `DATABASE_URL` | — | PostgreSQL connection string |
 | `AUTH_ENCRYPTION_SECRET` | — | JWT signing secret |
 | `PLATFORM_ADMIN_PASSWORD` | — | Admin API password |
-| `AUTH_REQUIRED` | true | **Set to `false`** — mcp-auth-proxy handles all external auth; ContextForge's internal auth uses HMAC JWT which conflicts with auth-proxy's RS256 JWT |
+| `AUTH_REQUIRED` | true | **Set to `true`** — ContextForge enforces auth internally. Proxy auth mode: `TRUST_PROXY_AUTH=true` + `PROXY_USER_HEADER=X-Authenticated-User` |
+| `TRUST_PROXY_AUTH` | false | When `true` + `TRUST_PROXY_AUTH_DANGEROUSLY=true` + `MCP_CLIENT_AUTH_ENABLED=false`, ContextForge trusts the identity header from auth-proxy |
+| `PROXY_USER_HEADER` | X-Authenticated-User | Header name that auth-proxy sets with the user's email after JWT validation |
+| `SSO_AUTO_CREATE_USERS` | false | When `true`, auto-creates EmailUser on first request from unknown user |
+| `SSO_GOOGLE_ADMIN_DOMAINS` | — | Users from this domain auto-promoted to admin (set to `junlinleather.com`) |
 | `CACHE_TYPE` | database | `database`, `memory`, or `redis` |
 | `HTTP_SERVER` | gunicorn | `gunicorn` or `granian` — only affects ContextForge's own entrypoint, which we bypass |
 
@@ -60,7 +63,7 @@ Traffic flow: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backen
 | Service | Endpoint | Notes |
 |---------|----------|-------|
 | ContextForge | `/health` | NOT `/healthz`. Returns `{"status": "healthy"}` |
-| Apollo | None confirmed | TCP check on :8000 works |
+| Apollo | `/mcp` on :8000 | Any HTTP response = up (404/405 expected on GET) |
 | dev-mcp bridge | `/healthz` | Standard health endpoint |
 | google-sheets bridge | `/healthz` | Standard health endpoint |
 | mcp-auth-proxy | Responds on :8080 | 401 = healthy (auth required) |
@@ -80,6 +83,100 @@ Traffic flow: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backen
 11. **T+15-20s**: Cloud Run TCP startup probe succeeds on :8080
 
 Total cold start: ~15-20s (with `--cpu-boost`)
+
+## Identity Forwarding (v2.5.4-identity fork)
+
+mcp-auth-proxy is a fork of `sigbit/mcp-auth-proxy` v2.5.4 with a 14-line patch:
+
+1. **Defense-in-depth**: Strips any pre-existing `X-Authenticated-User` header from incoming requests BEFORE JWT validation (prevents spoofing)
+2. **Identity extraction**: After JWT validation succeeds, extracts `sub` claim (user email) and sets `X-Authenticated-User` header
+3. **Fallback**: If no `sub` claim, tries `client_id` claim
+4. **No identity = no header**: If JWT has neither claim, request proxies without identity header — ContextForge with `AUTH_REQUIRED=true` rejects it
+
+**ContextForge proxy auth activation** (all three required):
+- `MCP_CLIENT_AUTH_ENABLED=false`
+- `TRUST_PROXY_AUTH=true`
+- `TRUST_PROXY_AUTH_DANGEROUSLY=true`
+
+**End-to-end flow:**
+```
+Client → auth-proxy validates JWT → extracts sub=ourteam@junlinleather.com
+       → sets X-Authenticated-User header → strips Authorization header
+       → ContextForge reads header → resolves EmailUser → checks RBAC
+       → routes to backend → audit trail records user_email
+```
+
+**Fork repo**: `junlin3012/mcp-auth-proxy` (branch: `identity-forwarding`, tag: `v2.5.4-identity`)
+
+## Security Protocols
+
+### 1. Network Boundary
+- **Only port 8080 is exposed** to the internet (via Cloud Run)
+- mcp-auth-proxy on :8080 is the ONLY externally reachable process
+- ContextForge on :4444, Apollo on :8000, dev-mcp on :8003, sheets on :8004 are **internal only**
+- All inter-process communication is over `127.0.0.1` (localhost within the container)
+- Cloud Run provides TLS termination — all external traffic is HTTPS
+
+### 2. Authentication Flow
+- **OAuth 2.1 with PKCE** — mcp-auth-proxy handles the full OAuth flow
+- **Google OAuth** primary auth (--google-client-id, --google-allowed-users)
+- **Password fallback** for CLI clients (--password)
+- **RSA-signed JWTs** issued by auth-proxy (RS256, not HS256)
+- **JWT validation** on every request — RSA signature check, expiry check
+
+### 3. Identity Header Security (X-Authenticated-User)
+Three layers of defense prevent identity spoofing:
+
+| Layer | What | Where |
+|-------|------|-------|
+| **Strip incoming** | `c.Request.Header.Del("X-Authenticated-User")` at top of `handleProxy()` | proxy.go:61 |
+| **Set only after validation** | Header set ONLY after RSA JWT validation succeeds | proxy.go:84-90 |
+| **Block proxyHeaders override** | `proxyHeaders` loop explicitly skips `X-Authenticated-User` | proxy.go:99-101 |
+
+**Why this is safe:**
+- External clients cannot inject the header (stripped before auth)
+- Only valid RSA-signed JWTs can set the header (auth-proxy is the only RSA key holder)
+- Static `--proxy-headers` config cannot override the validated value
+- ContextForge on :4444 is not exposed — only auth-proxy can reach it
+
+### 4. ContextForge Proxy Auth Mode
+When all three conditions are met, ContextForge trusts the identity header:
+- `MCP_CLIENT_AUTH_ENABLED=false` — disables ContextForge's own JWT validation
+- `TRUST_PROXY_AUTH=true` — enables proxy auth pipeline
+- `TRUST_PROXY_AUTH_DANGEROUSLY=true` — acknowledges the security implications
+
+**TRUST_PROXY_AUTH_DANGEROUSLY is safe here** because:
+- ContextForge on :4444 is NOT exposed to the internet
+- Only auth-proxy (same container, localhost) can reach it
+- Auth-proxy validates and sets the header correctly
+- If :4444 were ever exposed directly, this would be a critical vulnerability
+
+### 5. Secrets Management
+| Secret | Storage | Access |
+|--------|---------|--------|
+| SHOPIFY_CLIENT_SECRET | GCP Secret Manager | `--set-secrets` in Cloud Run |
+| JWT_SECRET_KEY | GCP Secret Manager | Used for ContextForge bootstrap JWTs (HS256) |
+| AUTH_PASSWORD | GCP Secret Manager | CLI password fallback |
+| GOOGLE_OAUTH_CLIENT_SECRET | GCP Secret Manager | OAuth flow |
+| AUTH_ENCRYPTION_SECRET | GCP Secret Manager | ContextForge DB encryption (separate from JWT) |
+| DB_PASSWORD | GCP Secret Manager | PostgreSQL connection |
+
+**Known limitation**: auth-proxy passes `--password` and `--google-client-secret` via CLI args, visible in `/proc/cmdline`. Bounded risk: all processes run as UID 1001 in the same container.
+
+### 6. Binary Integrity
+All downloaded binaries are SHA256-verified in Dockerfile.base:
+- **mcp-auth-proxy**: `sha256sum -c -` check against pinned hash
+- **tini**: same pattern
+- **Apollo**: compiled from source (Rust cargo build)
+
+Updating a binary requires: recompile → record new hash → update Dockerfile.base → rebuild base image.
+
+### 7. RBAC (Role-Based Access Control)
+- **Teams**: admin (full access), viewer (read-only Shopify)
+- **Roles**: platform_admin, developer, viewer (ContextForge built-in)
+- **Auto-create users**: `SSO_AUTO_CREATE_USERS=true` on first request
+- **Auto-promote admins**: `SSO_GOOGLE_ADMIN_DOMAINS=junlinleather.com`
+- **Bootstrap**: teams/roles set up at container start before any user login
 
 ## Known Gotchas
 
@@ -105,9 +202,9 @@ Total cold start: ~15-20s (with `--cpu-boost`)
 - `POST /gateways` registers backends and triggers tool auto-discovery into the catalog
 - `POST /servers` creates virtual servers that bundle subsets of discovered tools
 - MCP clients connect to `/servers/<UUID>/mcp` — without a virtual server, `tools/list` returns empty
-- Transport values: `SSE` for all backends (ContextForge's MCP client has a bug with `streamablehttp`)
+- Transport values: `STREAMABLEHTTP` for Apollo, `SSE` for dev-mcp and sheets
 - JWT token generated via `mcpgateway.utils.create_jwt_token` in ContextForge venv
-- Gateway body: `{"name":"...","url":"...","transport":"SSE"}`
+- Gateway body: `{"name":"...","url":"...","transport":"SSE|STREAMABLEHTTP"}`
 - Server body: `{"server":{"name":"...","description":"...","associated_tools":[...]}}`
 
 ### 5. Binary permissions in multi-stage Docker builds

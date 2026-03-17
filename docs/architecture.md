@@ -71,7 +71,7 @@ Cloud Run container (:8080 exposed)
 +-- tini (PID 1, init process, signal forwarding)
     +-- entrypoint.sh (orchestrator)
         |
-        +-- 1. Apollo bridge (Rust->stdio->SSE)   :8000
+        +-- 1. Apollo (Rust, streamable_http)      :8000
         |      Shopify GraphQL operations
         |
         +-- 2. ContextForge (Python/FastAPI)       :4444
@@ -549,7 +549,7 @@ gcloud builds submit --config=deploy/cloudbuild.yaml \
 ### Bootstrap Registration Pipeline
 
 1. Generate JWT token (10 min expiry) via ContextForge Python venv
-2. Wait for Apollo bridge (60s timeout, check PID + SSE probe)
+2. Wait for Apollo (60s timeout, check PID + HTTP probe on /mcp)
 3. Delete stale Apollo registration (if any), then register with ContextForge (`POST /gateways`)
 4. Wait for dev-mcp bridge (120s timeout — npx install can be slow)
 5. Delete stale dev-mcp registration, then register (`POST /gateways`)
@@ -780,9 +780,9 @@ ContextForge supports OpenTelemetry (OTLP) for Cloud Trace integration, but no `
 
 Cloud Run `--timeout=300` applies to SSE connections. MCP SSE sessions are long-lived HTTP responses — any session open >5 minutes is forcibly terminated by Cloud Run with no warning. **Fix**: Increase to `--timeout=3600` (Cloud Run maximum, 1 hour). AI clients must handle reconnection for sessions >1 hour. *(Mirror Polish Batch 7, R64)*
 
-### 8. Identity Lost at Proxy Boundary (Elevated to Architecture Issue #12)
+### 8. ~~Identity Lost at Proxy Boundary~~ — RESOLVED (Architecture Issue #12)
 
-Elevated to Architecture Issue #12 due to severity — see that entry for full details. In summary: mcp-auth-proxy validates OAuth tokens but does NOT forward user identity to ContextForge. All requests appear anonymous. Directly contradicts the product's "per-user identity" value proposition. *(Mirror Polish Batch 3 R23, Batch 9 R83, consolidated Batch 14 R139)*
+**RESOLVED** via forked mcp-auth-proxy v2.5.4-identity. Auth-proxy now extracts `sub` (email) from validated JWT and sets `X-Authenticated-User` header. ContextForge consumes it via `TRUST_PROXY_AUTH` mode — no plugins needed. See spec: `docs/superpowers/specs/2026-03-17-identity-rbac-design.md`
 
 ### 9. No Inner-Layer Timeouts (Latency Budget Gap)
 
@@ -924,19 +924,14 @@ These are known architectural problems identified during operation. They represe
 
 **Desired state**: Pin Node.js major version (e.g., nodejs20) or use multi-stage build with explicit Node.js version.
 
-### Issue 12: Identity Loss at Proxy Boundary
+### Issue 12: ~~Identity Loss at Proxy Boundary~~ — RESOLVED
 
-**Problem**: mcp-auth-proxy authenticates users via OAuth but does NOT forward user identity to ContextForge. No `--forward-headers`, `--user-header`, or equivalent flag exists in auth-proxy v2.5.4. `AUTH_REQUIRED=false` means ContextForge sees all requests as anonymous.
+**Resolution**: Forked mcp-auth-proxy to `junlin3012/mcp-auth-proxy` v2.5.4-identity. The fork adds 14 lines to `proxy.go`: strips incoming `X-Authenticated-User` header (defense-in-depth), then extracts `sub` (email) from validated JWT and sets the header. ContextForge consumes it via built-in `TRUST_PROXY_AUTH` mode — **no plugins needed** (the earlier assumption that `http_auth_resolve_user` plugin was required was wrong).
 
-**Impact**: Directly contradicts the product's core value proposition — "per-user identity." All audit trail entries are anonymous. RBAC roles exist but have no user to bind to. Per-user rate limiting is impossible. Multi-tenant operations would be unsafe.
+**Spec**: `docs/superpowers/specs/2026-03-17-identity-rbac-design.md`
+**Fork**: `junlin3012/mcp-auth-proxy` (branch: `identity-forwarding`, tag: `v2.5.4-identity`)
 
-**Root cause**: (1) auth-proxy v2.5.4 doesn't expose a user-identity forwarding mechanism. (2) ContextForge's `AUTH_REQUIRED=false` disables all identity-aware features.
-
-**Cascading dependencies**: Identity propagation requires the `http_auth_resolve_user` plugin hook in ContextForge — but plugin stability is uncertain in RC-2, creating a phase dependency inversion (see V4 Design Directions).
-
-**Desired state**: auth-proxy forwards `X-Forwarded-User` header. ContextForge plugin consumes it and maps to internal user. All tool calls have per-user attribution in audit trail.
-
-*(Mirror Polish Batch 3 R23, Batch 9 R83. Elevated to Architecture Issue due to severity.)*
+*(Mirror Polish Batch 3 R23, Batch 9 R83. Resolved 2026-03-17.)*
 
 ---
 
@@ -986,9 +981,7 @@ Comprehensive catalog of identified risks beyond the Architecture Issues above. 
 
 **Problem**: User identity is consumed by auth-proxy and NOT forwarded. ContextForge (`AUTH_REQUIRED=false`) sees all requests as anonymous. Audit trail has no per-user attribution. DCR client registrations lost on restart (ephemeral `/app/data`).
 
-**Correction**: Elevated to Architecture Issue #12. Two-phase approach:
-1. auth-proxy forwards `X-Forwarded-User` header (investigate v2.5.4 capability)
-2. ContextForge consumes header via `http_auth_resolve_user` plugin (blocked on plugin stability)
+**RESOLVED**: See Architecture Issue #12. Forked auth-proxy forwards `X-Authenticated-User` header; ContextForge consumes via built-in `TRUST_PROXY_AUTH` — no plugins needed.
 
 ### Latency Budget (High — R81)
 
