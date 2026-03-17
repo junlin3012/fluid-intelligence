@@ -436,13 +436,29 @@ echo "[bootstrap] Setting up teams and RBAC..."
 ADMIN_TEAM_ID=$(create_team "admin" "Full access to all backends")
 VIEWER_TEAM_ID=$(create_team "viewer" "Read-only Shopify access")
 
-# === User Assignment ===
-if [ -n "$ADMIN_TEAM_ID" ]; then
-  add_user_to_team "$ADMIN_TEAM_ID" "ourteam@junlinleather.com" "owner"
-fi
+# === User + Role Assignment ===
+# Note: SSO_AUTO_CREATE_USERS=true auto-creates users on first login.
+# SSO_GOOGLE_ADMIN_DOMAINS=junlinleather.com auto-promotes to admin.
+# So role assignment happens automatically when a user first authenticates
+# via Google OAuth. Bootstrap only pre-assigns team membership IF the user
+# already exists (e.g., after first login).
 
-# === Role Assignment ===
-assign_role "ourteam@junlinleather.com" "platform_admin" "global"
+# Check if the primary user exists before attempting team/role assignment
+primary_user="ourteam@junlinleather.com"
+user_exists=$(curl -sf -L --connect-timeout 2 --max-time 10 \
+  -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
+  "$CF/rbac/users/$primary_user/" 2>/dev/null | jq -r '.email // empty' 2>/dev/null) || true
+
+if [ "$user_exists" = "$primary_user" ]; then
+  echo "[bootstrap] User $primary_user exists — assigning team + role"
+  if [ -n "$ADMIN_TEAM_ID" ]; then
+    add_user_to_team "$ADMIN_TEAM_ID" "$primary_user" "owner"
+  fi
+  assign_role "$primary_user" "platform_admin" "global"
+else
+  echo "[bootstrap] User $primary_user not yet created (will be auto-created on first OAuth login)"
+  echo "[bootstrap]   SSO_GOOGLE_ADMIN_DOMAINS=junlinleather.com will auto-promote to admin"
+fi
 
 # Example: add a viewer later
 # if [ -n "$VIEWER_TEAM_ID" ]; then
