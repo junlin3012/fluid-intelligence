@@ -23,7 +23,7 @@ RUN cargo build --release --locked
 # Adds X-Authenticated-User header from JWT sub claim for ContextForge proxy auth
 FROM alpine:3.20 AS authproxy
 ADD https://github.com/junlin3012/mcp-auth-proxy/releases/download/v2.5.4-identity/mcp-auth-proxy-linux-amd64 /mcp-auth-proxy
-RUN echo "bde2081767e587aa6a98e5a2f5f59e4761b342a6c6f709bc808a98d2f90998bd  /mcp-auth-proxy" | sha256sum -c - && \
+RUN echo "024e25f576b2c485e5cf57b3624df1dbea288c8ee84df473024d53c5b11d4949  /mcp-auth-proxy" | sha256sum -c - && \
     chmod +x /mcp-auth-proxy
 
 # Stage 3: Runtime — ContextForge base + all system deps + binaries
