@@ -64,6 +64,12 @@ fi
 
 CF="http://127.0.0.1:${CONTEXTFORGE_PORT:-4444}"
 
+# Identity header for proxy auth mode (TRUST_PROXY_AUTH=true).
+# ContextForge expects X-Authenticated-User on all endpoints when proxy auth is active.
+# SSO_AUTO_CREATE_USERS=true + SSO_GOOGLE_ADMIN_DOMAINS=junlinleather.com auto-creates
+# and auto-promotes this user to admin on first request.
+PROXY_AUTH_HEADER="X-Authenticated-User: ${PLATFORM_ADMIN_EMAIL}"
+
 # Fast-fail: verify ContextForge is still alive before expensive registration attempts
 check_contextforge() {
   if ! curl -sf --connect-timeout 2 --max-time 3 "$CF/health" > /dev/null 2>&1; then
@@ -81,7 +87,7 @@ register_gateway() {
   # Delete any existing registrations (stale URL/transport from previous deploy)
   # Use head -1 to handle multiple entries with the same name (delete each individually)
   local existing_ids
-  existing_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" \
+  existing_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     "$CF/gateways" 2>/dev/null | \
     jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null) || true
   if [ -n "$existing_ids" ]; then
@@ -89,7 +95,7 @@ register_gateway() {
       [ -z "$eid" ] || [ "$eid" = "null" ] && continue
       echo "[bootstrap] Deleting stale $name (id=$eid)"
       del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
-        -H "Authorization: Bearer $TOKEN" "$CF/gateways/$eid" 2>/dev/null) || del_code=0
+        -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/gateways/$eid" 2>/dev/null) || del_code=0
       if [ "$del_code" -ne 200 ] && [ "$del_code" -ne 204 ] && [ "$del_code" -ne 404 ]; then
         echo "[bootstrap] WARNING: DELETE gateway $eid returned HTTP $del_code"
       fi
@@ -102,7 +108,7 @@ register_gateway() {
       '{name: $n, url: $u, transport: $t}')
     local curl_err="/tmp/bootstrap-curl-err-$$.log"
     response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 60 -X POST \
-      -H "Authorization: Bearer $TOKEN" \
+      -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
       -H "Content-Type: application/json" \
       -d "$payload" \
       "$CF/gateways" 2>"$curl_err")
@@ -217,7 +223,7 @@ MIN_TOOL_COUNT=${MIN_TOOL_COUNT:-70}
 prev_count=-1
 stable=0
 for i in $(seq 1 30); do
-  TOOL_COUNT=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
+  TOOL_COUNT=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
   [[ "$TOOL_COUNT" =~ ^[0-9]+$ ]] || TOOL_COUNT=0
   if [ "$TOOL_COUNT" -eq "$prev_count" ] && [ "$TOOL_COUNT" -gt 0 ]; then
     stable=$((stable + 1))
@@ -246,7 +252,7 @@ fi
 echo "[bootstrap] Creating virtual server..."
 
 # Delete existing virtual servers (stale from previous deploy — could be multiple)
-existing_vs_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" \
+existing_vs_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
   "$CF/servers" 2>/dev/null | \
   jq -r '.[] | select(.name=="fluid-intelligence") | .id' 2>/dev/null) || true
 if [ -n "$existing_vs_ids" ]; then
@@ -254,7 +260,7 @@ if [ -n "$existing_vs_ids" ]; then
     [ -z "$vs_id" ] || [ "$vs_id" = "null" ] && continue
     echo "[bootstrap] Deleting stale virtual server (id=$vs_id)"
     vs_del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
-      -H "Authorization: Bearer $TOKEN" "$CF/servers/$vs_id" 2>/dev/null) || vs_del_code=0
+      -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/servers/$vs_id" 2>/dev/null) || vs_del_code=0
     if [ "$vs_del_code" -ne 200 ] && [ "$vs_del_code" -ne 204 ] && [ "$vs_del_code" -ne 404 ]; then
       echo "[bootstrap] WARNING: DELETE virtual server $vs_id returned HTTP $vs_del_code"
     fi
@@ -262,7 +268,7 @@ if [ -n "$existing_vs_ids" ]; then
 fi
 
 # Get all tool IDs from the catalog
-TOOL_IDS=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | \
+TOOL_IDS=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | \
   jq -r 'if type == "array" then [.[].id | select(. != null)] | @json else "[]" end' 2>/dev/null) || TOOL_IDS="[]"
 if [ "$TOOL_IDS" = "[]" ]; then
   echo "[bootstrap] WARNING: No tool IDs found — virtual server will expose zero tools"
@@ -274,7 +280,7 @@ vs_payload=$(jq -n --argjson tools "$TOOL_IDS" \
   '{server: {name: "fluid-intelligence", description: "All Shopify + Google Sheets tools", associated_tools: $tools}}')
 vs_curl_err="/tmp/bootstrap-vs-curl-err-$$.log"
 vs_response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
-  -H "Authorization: Bearer $TOKEN" \
+  -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
   -H "Content-Type: application/json" \
   -d "$vs_payload" \
   "$CF/servers" 2>"$vs_curl_err")
@@ -303,11 +309,11 @@ fi
 
 # --- Debug dump ---
 echo "[bootstrap] --- Debug: /gateways ---"
-curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/gateways" 2>/dev/null | jq '[.[] | {name, id, url}]' 2>/dev/null || echo "  /gateways failed"
+curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/gateways" 2>/dev/null | jq '[.[] | {name, id, url}]' 2>/dev/null || echo "  /gateways failed"
 echo "[bootstrap] --- Debug: /servers ---"
-curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/servers" 2>/dev/null | jq '[.[] | {name, id}]' 2>/dev/null || echo "  /servers failed"
+curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/servers" 2>/dev/null | jq '[.[] | {name, id}]' 2>/dev/null || echo "  /servers failed"
 echo "[bootstrap] --- Debug: tool names ---"
-curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq '[.[].name]' 2>/dev/null | head -30 || echo "  /tools failed"
+curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | jq '[.[].name]' 2>/dev/null | head -30 || echo "  /tools failed"
 
 # ============================================================
 # RBAC: Team + User + Role Setup
@@ -324,7 +330,7 @@ create_team() {
     '{name: $n, description: $d, visibility: "private"}')
 
   response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
-    -H "Authorization: Bearer $TOKEN" \
+    -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "$payload" \
     "$CF/teams" 2>/dev/null) || true
@@ -342,7 +348,7 @@ create_team() {
     echo "$team_id"
   elif [ "$http_code" -eq 409 ]; then
     team_id=$(curl -sf --connect-timeout 2 --max-time 10 \
-      -H "Authorization: Bearer $TOKEN" \
+      -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
       "$CF/teams" 2>/dev/null | \
       jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null | head -1) || true
     echo "[bootstrap] Team '$name' already exists (id=$team_id)" >&2
@@ -361,7 +367,7 @@ add_user_to_team() {
     '{email: $e, role: $r}')
 
   response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
-    -H "Authorization: Bearer $TOKEN" \
+    -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "$payload" \
     "$CF/teams/$team_id/members" 2>/dev/null) || true
@@ -384,7 +390,7 @@ assign_role() {
     '{role_name: $r, scope: $s, scope_id: (if $si == "" then null else $si end)}')
 
   response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
-    -H "Authorization: Bearer $TOKEN" \
+    -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "$payload" \
     "$CF/rbac/users/$email/roles" 2>/dev/null) || true
