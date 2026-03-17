@@ -13,6 +13,15 @@
 - **What changed**: Added Module 0: IAM to the spec. Per-user API keys, per-user passphrases, role-based tool filtering. Identity baked into Phase 1, not bolted on later.
 - **Lesson**: Identity is not a feature. It is the foundation. Everything else (logging, admin tools, security audit) is useless without it. When designing security, answer WHO before HOW.
 
+## 2026-03-17: Hardcoded Business Values Throughout Codebase
+
+- **What happened**: During the identity forwarding implementation, the agent hardcoded `ourteam@junlinleather.com` directly into `bootstrap.sh` (line 447), wrote conditional logic around a specific user email, and treated team names ("admin", "viewer") as string literals. The user caught this and flagged it as a fundamental anti-pattern.
+- **Root cause**: The agent followed the POC code (which also had hardcoded emails) without questioning the pattern. It optimized for "get it working" over "get it right." The identity spec itself used specific emails as examples, and the implementation copied them literally into code.
+- **Scope of the problem**: An audit found **47 hardcoded business-specific values** across the codebase: emails, domain names, GCP project IDs, Cloud SQL instance names, port numbers, service versions, Cloud Run URLs, and GitHub repo paths.
+- **How it should have been caught**: The agent should have asked: "If someone forks this repo for a different business, what would they need to change?" The answer should be "only env vars and secrets" — but instead it was "grep for junlinleather across 15 files."
+- **What changed**: Added ZERO HARDCODED BUSINESS VALUES rule to `patterns.md`. All business-specific values must come from environment variables or config files. Scripts must be completely portable.
+- **Lesson**: Hardcoded business values are like HIV in software — they don't kill immediately, they destroy the immune system over time. When you need to scale, change domains, onboard a second customer, or hand off to another team, every hardcoded value becomes a landmine. The cost of parameterizing is 30 seconds per value. The cost of not parameterizing is hours of grep-and-pray debugging months later. **Agents: if you write a hardcoded business value, you have introduced a bug.**
+
 ## 2026-03-14: Static Agent Instructions
 
 - **What happened**: Created `introspect.md` as a static instruction document. It told agents how to think but didn't tell them to update the document itself when they learned something. No mechanism for storing reflections, recording insights, or improving the process.

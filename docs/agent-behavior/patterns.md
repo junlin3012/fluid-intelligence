@@ -63,6 +63,53 @@
 - All secrets in Secret Manager, never hardcode or commit
 - Secret names: `shopify-client-id`, `shopify-client-secret`, `mcp-auth-passphrase`, `mcp-jwt-secret`, `google-oauth-client-id`, `google-oauth-client-secret`, `google-sheets-credentials`, `db-password`
 
+## ZERO HARDCODED BUSINESS VALUES (MANDATORY)
+
+**This is non-negotiable. Hardcoded business-specific values in code are a death sentence for scalable software.**
+
+### The Rule
+Every business-specific value MUST come from an environment variable or config file. Scripts and code must be **completely portable** — if you fork this repo for a different business, ZERO code changes should be needed. Only env vars and secrets change.
+
+### What counts as "business-specific"
+- Email addresses (`ourteam@junlinleather.com`, `admin@junlinleather.com`)
+- Domain names (`junlinleather.com`, `junlinleather-5148.myshopify.com`)
+- GCP project IDs (`junlinleather-mcp`)
+- Cloud SQL instance names (`junlinleather-mcp:asia-southeast1:contextforge`)
+- Cloud Run URLs (`fluid-intelligence-1056128102929.asia-southeast1.run.app`)
+- GitHub repo paths (`junlin3012/mcp-auth-proxy`)
+- Team names, user emails, role assignments
+- Service port numbers (use env vars with defaults)
+- Tool/library versions in scripts (use env vars with defaults)
+
+### The Pattern
+```bash
+# WRONG — hardcoded, dies when you change anything
+primary_user="ourteam@junlinleather.com"
+
+# RIGHT — env var with sensible default
+primary_user="${PRIMARY_USER_EMAIL:?PRIMARY_USER_EMAIL must be set}"
+
+# ALSO RIGHT — default for development only
+APOLLO_PORT="${APOLLO_PORT:-8000}"
+```
+
+### Where config lives
+| What | Where | Example |
+|------|-------|---------|
+| Secrets | GCP Secret Manager | `--set-secrets=SHOPIFY_CLIENT_ID=shopify-client-id:latest` |
+| Business config | `cloudbuild.yaml --set-env-vars` | `SHOPIFY_STORE=...` |
+| Defaults | entrypoint.sh env var defaults | `${MCPGATEWAY_PORT:-4444}` |
+| Never | Hardcoded in scripts/code | ~~`curl http://127.0.0.1:8000`~~ |
+
+### Why this matters
+Hardcoded values are like HIV in software — they don't kill immediately, they destroy the immune system. When you need to:
+- Deploy for a second customer → hardcoded values block you
+- Change your email/domain → grep-and-pray across the codebase
+- Hand off to another team → they inherit your personal emails in prod code
+- Scale to multi-tenant → impossible without ripping out every hardcoded value
+
+**Agents: if you write a hardcoded business value, you have introduced a bug. Fix it before committing.**
+
 ## Cost Consciousness (CRITICAL)
 
 Cloud cost and efficiency MUST be part of every design decision. The target monthly GCP bill is $15-25/mo (with min-instances=0).
