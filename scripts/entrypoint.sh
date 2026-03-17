@@ -69,6 +69,12 @@ if [[ -n "${DB_NAME:-}" ]] && ! [[ "${DB_NAME}" =~ ^[a-zA-Z0-9_]+$ ]]; then
   exit 1
 fi
 
+# --- Security: X-Authenticated-User header ---
+# auth-proxy (Go) strips this header from incoming requests and only sets it after JWT validation.
+# ContextForge trusts it unconditionally (TRUST_PROXY_AUTH_DANGEROUSLY=true).
+# Safety: ContextForge on :4444 is NOT exposed to Cloud Run — only auth-proxy on :8080 is.
+# If this assumption ever changes, add header validation here.
+
 # --- Env var wiring ---
 # URL-encode DB_PASSWORD to handle special chars (@, ?, /, %) that break connection strings
 encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))")
@@ -309,7 +315,7 @@ for p in "${PIDS[@]}"; do [ "$p" != "$BOOTSTRAP_PID" ] && NEW_PIDS+=("$p"); done
 PIDS=("${NEW_PIDS[@]}")
 
 echo "[fluid-intelligence] All services running [+$(elapsed)s]"
-echo "  Apollo bridge:  PID=$APOLLO_PID  :8000"
+echo "  Apollo:         PID=$APOLLO_PID  :8000"
 echo "  ContextForge:   PID=$CONTEXTFORGE_PID  :${CONTEXTFORGE_PORT}"
 echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :8003"
 echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :8004"
@@ -324,7 +330,7 @@ set -e
 
 echo "[fluid-intelligence] FATAL: A process exited unexpectedly (first exit code: $FIRST_EXIT)"
 
-for name_pid in "Apollo-bridge:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$TRANSLATE_DEVMCP_PID" "sheets:$TRANSLATE_SHEETS_PID" "auth-proxy:$AUTHPROXY_PID"; do
+for name_pid in "Apollo:$APOLLO_PID" "ContextForge:$CONTEXTFORGE_PID" "dev-mcp:$TRANSLATE_DEVMCP_PID" "sheets:$TRANSLATE_SHEETS_PID" "auth-proxy:$AUTHPROXY_PID"; do
   name="${name_pid%%:*}"
   pid="${name_pid##*:}"
   if ! kill -0 "$pid" 2>/dev/null; then

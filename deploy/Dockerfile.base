@@ -18,10 +18,12 @@ RUN git clone --depth 1 --branch ${APOLLO_VERSION} \
 WORKDIR /src
 RUN cargo build --release --locked
 
-# Stage 2: mcp-auth-proxy binary
+# Stage 2: mcp-auth-proxy binary (FORKED — identity forwarding patch)
+# Fork: junlin3012/mcp-auth-proxy v2.5.4-identity
+# Adds X-Authenticated-User header from JWT sub claim for ContextForge proxy auth
 FROM alpine:3.20 AS authproxy
-ADD https://github.com/sigbit/mcp-auth-proxy/releases/download/v2.5.4/mcp-auth-proxy-linux-amd64 /mcp-auth-proxy
-RUN echo "d4433764543a65f0efc70d878a693f28b1eec517eb66a81ff131398b3a42b3c2  /mcp-auth-proxy" | sha256sum -c - && \
+ADD https://github.com/junlin3012/mcp-auth-proxy/releases/download/v2.5.4-identity/mcp-auth-proxy-linux-amd64 /mcp-auth-proxy
+RUN echo "42b9b87fe71e2b164bd43e88ff9e44e614f069131b3baac30507e73ef5ab5ceb  /mcp-auth-proxy" | sha256sum -c - && \
     chmod +x /mcp-auth-proxy
 
 # Stage 3: Runtime — ContextForge base + all system deps + binaries

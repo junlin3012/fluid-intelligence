@@ -10,8 +10,9 @@ parse_http_code() {
   [[ "$code" =~ ^[0-9]+$ ]] && echo "$code" || echo "0"
 }
 
-# Generate admin JWT for registration (10 min expiry to cover slow bridge starts:
-# worst case Apollo 60s + dev-mcp 120s + sheets 60s + convergence 60s = 5 min of waiting)
+# Generate admin JWT for registration (10 min expiry to cover slow starts:
+# worst case waits: Apollo 60s + dev-mcp 120s + sheets 60s + convergence 60s = 5 min
+# plus registration retries if backends are slow to respond)
 # Pass secrets via env vars to avoid shell injection (quotes in values would break inline Python)
 PRIMARY_ERR=""
 TOKEN=$(ADMIN_EMAIL="$PLATFORM_ADMIN_EMAIL" SECRET_KEY="$JWT_SECRET_KEY" /app/.venv/bin/python -c "
@@ -124,7 +125,7 @@ register_gateway() {
     echo "[bootstrap] $name registration attempt $attempt/$max_attempts failed (HTTP $http_code): $(echo "$body" | head -c 200)"
     [ -s "$curl_err" ] && echo "[bootstrap]   curl error: $(cat "$curl_err")"
     attempt=$((attempt + 1))
-    # Exponential backoff: 5s, 10s, 15s, 20s, 25s — gives subprocess time to initialize
+    # Linear backoff: 10s, 15s, 20s, 25s, 30s (attempt incremented before sleep)
     sleep "$((attempt * 5))"
   done
 
@@ -148,7 +149,7 @@ for i in $(seq 1 60); do
   # Apollo streamable_http: check if port 8000 accepts connections
   # Use -s (no -f) so any HTTP response = server is up (even 404/405)
   rc=0; curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/mcp 2>/dev/null || rc=$?
-  [ "$rc" -eq 0 ] && break
+  [ "$rc" -eq 0 ] && { echo "[bootstrap] Apollo ready after ${i}s"; break; }
   [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
 done
@@ -199,7 +200,7 @@ for i in $(seq 1 60); do
     fi
   fi
   rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8004/healthz > /dev/null 2>&1 || rc=$?
-  [ "$rc" -eq 0 ] && break
+  [ "$rc" -eq 0 ] && { echo "[bootstrap] google-sheets bridge ready after ${i}s"; break; }
   [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: google-sheets bridge not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
 done
@@ -307,3 +308,116 @@ echo "[bootstrap] --- Debug: /servers ---"
 curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/servers" 2>/dev/null | jq '[.[] | {name, id}]' 2>/dev/null || echo "  /servers failed"
 echo "[bootstrap] --- Debug: tool names ---"
 curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" "$CF/tools" 2>/dev/null | jq '[.[].name]' 2>/dev/null | head -30 || echo "  /tools failed"
+
+# ============================================================
+# RBAC: Team + User + Role Setup
+# ============================================================
+# Identity integration: after gateway + virtual server setup,
+# create teams and assign users so access is ready on first login.
+# Users auto-created on first request via SSO_AUTO_CREATE_USERS=true.
+
+# --- Create team (idempotent) ---
+create_team() {
+  local name="$1" description="$2"
+  local payload
+  payload=$(jq -n --arg n "$name" --arg d "$description" \
+    '{name: $n, description: $d, visibility: "private"}')
+
+  response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    "$CF/teams" 2>/dev/null) || true
+
+  http_code=$(parse_http_code "$response")
+  body=$(echo "$response" | sed '$d')
+
+  if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+    team_id=$(echo "$body" | jq -r '.id // empty' 2>/dev/null)
+    if [ -z "$team_id" ] || [ "$team_id" = "null" ]; then
+      echo "[bootstrap] WARNING: Team '$name' created (HTTP $http_code) but ID is empty — response: $(echo "$body" | head -c 200)" >&2
+    else
+      echo "[bootstrap] Created team '$name' (id=$team_id)" >&2
+    fi
+    echo "$team_id"
+  elif [ "$http_code" -eq 409 ]; then
+    team_id=$(curl -sf --connect-timeout 2 --max-time 10 \
+      -H "Authorization: Bearer $TOKEN" \
+      "$CF/teams" 2>/dev/null | \
+      jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null | head -1) || true
+    echo "[bootstrap] Team '$name' already exists (id=$team_id)" >&2
+    echo "$team_id"
+  else
+    echo "[bootstrap] WARNING: Failed to create team '$name' (HTTP $http_code)" >&2
+    echo ""
+  fi
+}
+
+# --- Add user to team (idempotent) ---
+add_user_to_team() {
+  local team_id="$1" email="$2" role="$3"
+  local payload
+  payload=$(jq -n --arg e "$email" --arg r "$role" \
+    '{email: $e, role: $r}')
+
+  response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    "$CF/teams/$team_id/members" 2>/dev/null) || true
+
+  http_code=$(parse_http_code "$response")
+  if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+    echo "[bootstrap] Added $email to team (role=$role)"
+  elif [ "$http_code" -eq 409 ]; then
+    echo "[bootstrap] $email already in team"
+  else
+    echo "[bootstrap] WARNING: Failed to add $email to team (HTTP $http_code)"
+  fi
+}
+
+# --- Assign role to user (idempotent) ---
+assign_role() {
+  local email="$1" role_name="$2" scope="$3" scope_id="${4:-}"
+  local payload
+  payload=$(jq -n --arg r "$role_name" --arg s "$scope" --arg si "$scope_id" \
+    '{role_name: $r, scope: $s, scope_id: (if $si == "" then null else $si end)}')
+
+  response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    "$CF/rbac/users/$email/roles" 2>/dev/null) || true
+
+  http_code=$(parse_http_code "$response")
+  if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+    echo "[bootstrap] Assigned role '$role_name' ($scope) to $email"
+  elif [ "$http_code" -eq 409 ]; then
+    echo "[bootstrap] $email already has role '$role_name'"
+  else
+    echo "[bootstrap] WARNING: Failed to assign role to $email (HTTP $http_code)"
+  fi
+}
+
+# === Team Setup ===
+check_contextforge
+echo "[bootstrap] Setting up teams and RBAC..."
+
+ADMIN_TEAM_ID=$(create_team "admin" "Full access to all backends")
+VIEWER_TEAM_ID=$(create_team "viewer" "Read-only Shopify access")
+
+# === User Assignment ===
+if [ -n "$ADMIN_TEAM_ID" ]; then
+  add_user_to_team "$ADMIN_TEAM_ID" "ourteam@junlinleather.com" "owner"
+fi
+
+# === Role Assignment ===
+assign_role "ourteam@junlinleather.com" "platform_admin" "global"
+
+# Example: add a viewer later
+# if [ -n "$VIEWER_TEAM_ID" ]; then
+#   add_user_to_team "$VIEWER_TEAM_ID" "contractor@example.com" "member"
+#   assign_role "contractor@example.com" "viewer" "team" "$VIEWER_TEAM_ID"
+# fi
+
+echo "[bootstrap] RBAC setup complete"
