@@ -329,11 +329,11 @@ create_team() {
   payload=$(jq -n --arg n "$name" --arg d "$description" \
     '{name: $n, description: $d, visibility: "private"}')
 
-  response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+  response=$(curl -s -L -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
     -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "$payload" \
-    "$CF/teams" 2>/dev/null) || true
+    "$CF/teams/" 2>/dev/null) || true
 
   http_code=$(parse_http_code "$response")
   body=$(echo "$response" | sed '$d')
@@ -347,9 +347,9 @@ create_team() {
     fi
     echo "$team_id"
   elif [ "$http_code" -eq 409 ]; then
-    team_id=$(curl -sf --connect-timeout 2 --max-time 10 \
+    team_id=$(curl -sf -L --connect-timeout 2 --max-time 10 \
       -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
-      "$CF/teams" 2>/dev/null | \
+      "$CF/teams/" 2>/dev/null | \
       jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null | head -1) || true
     echo "[bootstrap] Team '$name' already exists (id=$team_id)" >&2
     echo "$team_id"
@@ -366,11 +366,11 @@ add_user_to_team() {
   payload=$(jq -n --arg e "$email" --arg r "$role" \
     '{email: $e, role: $r}')
 
-  response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+  response=$(curl -s -L -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
     -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "$payload" \
-    "$CF/teams/$team_id/members" 2>/dev/null) || true
+    "$CF/teams/$team_id/members/" 2>/dev/null) || true
 
   http_code=$(parse_http_code "$response")
   if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
@@ -389,11 +389,11 @@ assign_role() {
   payload=$(jq -n --arg r "$role_name" --arg s "$scope" --arg si "$scope_id" \
     '{role_name: $r, scope: $s, scope_id: (if $si == "" then null else $si end)}')
 
-  response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+  response=$(curl -s -L -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
     -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "$payload" \
-    "$CF/rbac/users/$email/roles" 2>/dev/null) || true
+    "$CF/rbac/users/$email/roles/" 2>/dev/null) || true
 
   http_code=$(parse_http_code "$response")
   if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
