@@ -1,0 +1,37 @@
+# Local development — run gateway with local PostgreSQL (no GCP required)
+# Usage: cp .env.example .env → fill values → docker compose up
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - config/defaults.env
+      - .env
+    environment:
+      # Local PostgreSQL (overrides CLOUDSQL_INSTANCE requirement)
+      DATABASE_URL: postgresql://contextforge:localdev@postgres:5432/contextforge
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: contextforge
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: contextforge
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contextforge"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

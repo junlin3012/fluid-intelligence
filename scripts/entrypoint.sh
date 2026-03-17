@@ -10,6 +10,25 @@ fi
 START_TIME=$(date +%s)
 elapsed() { echo $(( $(date +%s) - START_TIME )); }
 
+# --- Load structural defaults (Layer 2) ---
+# Uses ${VAR:=default} syntax — only sets vars not already set by Cloud Run (Layer 3).
+DEFAULTS_FILE="/app/config/defaults.env"
+if [ -f "$DEFAULTS_FILE" ]; then
+  set -a
+  source "$DEFAULTS_FILE"
+  set +a
+else
+  echo "[fluid-intelligence] WARNING: $DEFAULTS_FILE not found — using environment vars only"
+fi
+
+# --- Validate all config before starting anything ---
+VALIDATE_SCRIPT="/app/validate-config.sh"
+if [ -f "$VALIDATE_SCRIPT" ]; then
+  bash "$VALIDATE_SCRIPT" || exit 1
+else
+  echo "[fluid-intelligence] WARNING: $VALIDATE_SCRIPT not found — skipping validation"
+fi
+
 echo "[fluid-intelligence] Starting services..."
 
 # --- Graceful shutdown (set trap BEFORE starting processes) ---
@@ -34,18 +53,9 @@ trap cleanup SIGTERM SIGINT
 # Clean stale PID files from previous runs (safe on Cloud Run tmpfs, defensive for Docker Compose)
 rm -f /tmp/apollo.pid /tmp/devmcp.pid /tmp/sheets.pid
 
-# --- Validate required env vars (BEFORE any use, especially DB_PASSWORD in URL encoding) ---
-: "${SHOPIFY_API_VERSION:?SHOPIFY_API_VERSION must be set (e.g., 2026-01)}"
-: "${DB_PASSWORD:?DB_PASSWORD must be set}"
-: "${SHOPIFY_CLIENT_ID:?SHOPIFY_CLIENT_ID must be set}"
-: "${SHOPIFY_CLIENT_SECRET:?SHOPIFY_CLIENT_SECRET must be set}"
-: "${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}"
-: "${AUTH_PASSWORD:?AUTH_PASSWORD must be set}"
-: "${SHOPIFY_STORE:?SHOPIFY_STORE must be set}"
-: "${GOOGLE_OAUTH_CLIENT_ID:?GOOGLE_OAUTH_CLIENT_ID must be set}"
-: "${GOOGLE_OAUTH_CLIENT_SECRET:?GOOGLE_OAUTH_CLIENT_SECRET must be set}"
-
 # --- Validate env var formats (defense-in-depth against injection) ---
+# Note: required-var checks are now in validate-config.sh (runs before this point).
+# These format checks remain as defense-in-depth against injection attacks.
 if ! [[ "$SHOPIFY_STORE" =~ ^[a-zA-Z0-9._-]+\.myshopify\.com$ ]]; then
   echo "[fluid-intelligence] FATAL: SHOPIFY_STORE must be a valid myshopify.com domain, got: $SHOPIFY_STORE"
   exit 1
@@ -82,8 +92,7 @@ if [ -z "$encoded_pw" ]; then
   echo "[fluid-intelligence] FATAL: URL-encoding DB_PASSWORD produced empty result"
   exit 1
 fi
-: "${CLOUDSQL_INSTANCE:?CLOUDSQL_INSTANCE must be set (e.g., project:region:instance)}"
-export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/${CLOUDSQL_INSTANCE}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:${encoded_pw}@/${DB_NAME}?host=/cloudsql/${CLOUDSQL_INSTANCE}}"
 # Use dedicated secret for ContextForge DB encryption (decoupled from JWT signing key).
 # Fall back to JWT_SECRET_KEY for backward compat during migration.
 if [ -n "${AUTH_ENCRYPTION_SECRET:-}" ]; then
@@ -93,26 +102,9 @@ else
   export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
 fi
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
-: "${PLATFORM_ADMIN_EMAIL:?PLATFORM_ADMIN_EMAIL must be set}"
-export PLATFORM_ADMIN_EMAIL
-
-# Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden.
-# ContextForge reads MCG_PORT (not PORT) for its listen port.
-export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
+# ContextForge port aliases (MCG_PORT is what ContextForge reads)
+export CONTEXTFORGE_PORT="$MCPGATEWAY_PORT"
 export MCG_PORT="$CONTEXTFORGE_PORT"
-export MCG_HOST="0.0.0.0"
-
-# Service ports (configurable for local development / compose overrides)
-export APOLLO_PORT="${APOLLO_PORT:-8000}"
-export DEVMCP_PORT="${DEVMCP_PORT:-8003}"
-export SHEETS_PORT="${SHEETS_PORT:-8004}"
-
-# Tool versions (configurable for upgrades without code changes)
-DEVMCP_VERSION="${DEVMCP_VERSION:-1.7.1}"
-SHEETS_VERSION="${SHEETS_VERSION:-0.6.0}"
-
-# Virtual server name
-VIRTUAL_SERVER_NAME="${VIRTUAL_SERVER_NAME:-fluid-intelligence}"
 
 # --- Read Shopify access token from Cloud SQL (OAuth service writes it) ---
 echo "[fluid-intelligence] Checking Cloud SQL for Shopify token..."
@@ -121,12 +113,17 @@ import os, sys
 try:
     import psycopg2
     from services.shopify_oauth.crypto import decrypt_token
-    conn = psycopg2.connect(
-        dbname=os.environ.get('DB_NAME', 'contextforge'),
-        user=os.environ.get('DB_USER', 'contextforge'),
-        password=os.environ.get('DB_PASSWORD', ''),
-        host='/cloudsql/' + os.environ.get('CLOUDSQL_INSTANCE', '')
-    )
+    # Use DATABASE_URL if set (local dev), otherwise construct from Cloud SQL vars
+    dsn = os.environ.get('DATABASE_URL')
+    if dsn:
+        conn = psycopg2.connect(dsn)
+    else:
+        conn = psycopg2.connect(
+            dbname=os.environ.get('DB_NAME', 'contextforge'),
+            user=os.environ.get('DB_USER', 'contextforge'),
+            password=os.environ.get('DB_PASSWORD', ''),
+            host='/cloudsql/' + os.environ.get('CLOUDSQL_INSTANCE', '')
+        )
     cur = conn.cursor()
     cur.execute('SELECT access_token_encrypted FROM shopify_installations WHERE shop_domain = %s AND status = %s',
                 (os.environ.get('SHOPIFY_STORE', ''), 'active'))
@@ -298,10 +295,10 @@ done
 # Risk is bounded: all processes run as UID 1001 in the same container.
 mcp-auth-proxy \
   --listen :8080 \
-  --external-url "https://${EXTERNAL_URL:?EXTERNAL_URL must be set}" \
+  --external-url "https://${EXTERNAL_URL}" \
   --google-client-id "$GOOGLE_OAUTH_CLIENT_ID" \
   --google-client-secret "$GOOGLE_OAUTH_CLIENT_SECRET" \
-  --google-allowed-users "${GOOGLE_ALLOWED_USERS:?GOOGLE_ALLOWED_USERS must be set}" \
+  --google-allowed-users "$GOOGLE_ALLOWED_USERS" \
   --password "$AUTH_PASSWORD" \
   --no-auto-tls \
   --data-path /app/data \

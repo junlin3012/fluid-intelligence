@@ -13,6 +13,7 @@ COPY shopify-schema.graphql /app/shopify-schema.graphql
 
 # 2. Config (changes occasionally)
 COPY config/mcp-config.yaml /app/mcp-config.yaml
+COPY config/defaults.env /app/config/defaults.env
 
 # 3. GraphQL operations (change moderately)
 COPY graphql/ /app/graphql/
@@ -25,9 +26,10 @@ RUN touch /app/services/__init__.py
 # 5. Scripts (change most often during development)
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 COPY scripts/bootstrap.sh /app/bootstrap.sh
+COPY scripts/validate-config.sh /app/validate-config.sh
 
 # Set permissions in a single layer (BuildKit COPY --chmod not available in Cloud Build)
-RUN chmod 755 /app/entrypoint.sh /app/bootstrap.sh && \
+RUN chmod 755 /app/entrypoint.sh /app/bootstrap.sh /app/validate-config.sh && \
     chown -R root:0 /app/entrypoint.sh /app/bootstrap.sh /app/mcp-config.yaml /app/shopify-schema.graphql /app/graphql/
 
 USER 1001
