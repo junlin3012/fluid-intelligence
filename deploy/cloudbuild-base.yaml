@@ -5,15 +5,18 @@ steps:
       - '-f'
       - 'deploy/Dockerfile.base'
       - '-t'
-      - 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intelligence-base:latest'
+      - '${_BASE_IMAGE}'
       - '.'
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intelligence-base:latest'
+      - '${_BASE_IMAGE}'
 images:
-  - 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intelligence-base:latest'
+  - '${_BASE_IMAGE}'
 timeout: '3600s'
 options:
   machineType: 'E2_HIGHCPU_8'
   logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _BASE_IMAGE: 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/fluid-intelligence-base:latest'

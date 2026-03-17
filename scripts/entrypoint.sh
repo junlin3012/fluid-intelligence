@@ -82,7 +82,8 @@ if [ -z "$encoded_pw" ]; then
   echo "[fluid-intelligence] FATAL: URL-encoding DB_PASSWORD produced empty result"
   exit 1
 fi
-export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge"
+: "${CLOUDSQL_INSTANCE:?CLOUDSQL_INSTANCE must be set (e.g., project:region:instance)}"
+export DATABASE_URL="postgresql://${DB_USER:-contextforge}:${encoded_pw}@/${DB_NAME:-contextforge}?host=/cloudsql/${CLOUDSQL_INSTANCE}"
 # Use dedicated secret for ContextForge DB encryption (decoupled from JWT signing key).
 # Fall back to JWT_SECRET_KEY for backward compat during migration.
 if [ -n "${AUTH_ENCRYPTION_SECRET:-}" ]; then
@@ -92,13 +93,26 @@ else
   export AUTH_ENCRYPTION_SECRET="${JWT_SECRET_KEY}"
 fi
 export PLATFORM_ADMIN_PASSWORD="${AUTH_PASSWORD}"
-export PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-admin@junlinleather.com}"
+: "${PLATFORM_ADMIN_EMAIL:?PLATFORM_ADMIN_EMAIL must be set}"
+export PLATFORM_ADMIN_EMAIL
 
 # Cloud Run injects PORT=8080 as a system env var that CANNOT be overridden.
 # ContextForge reads MCG_PORT (not PORT) for its listen port.
 export CONTEXTFORGE_PORT="${MCPGATEWAY_PORT:-4444}"
 export MCG_PORT="$CONTEXTFORGE_PORT"
 export MCG_HOST="0.0.0.0"
+
+# Service ports (configurable for local development / compose overrides)
+export APOLLO_PORT="${APOLLO_PORT:-8000}"
+export DEVMCP_PORT="${DEVMCP_PORT:-8003}"
+export SHEETS_PORT="${SHEETS_PORT:-8004}"
+
+# Tool versions (configurable for upgrades without code changes)
+DEVMCP_VERSION="${DEVMCP_VERSION:-1.7.1}"
+SHEETS_VERSION="${SHEETS_VERSION:-0.6.0}"
+
+# Virtual server name
+VIRTUAL_SERVER_NAME="${VIRTUAL_SERVER_NAME:-fluid-intelligence}"
 
 # --- Read Shopify access token from Cloud SQL (OAuth service writes it) ---
 echo "[fluid-intelligence] Checking Cloud SQL for Shopify token..."
@@ -111,7 +125,7 @@ try:
         dbname=os.environ.get('DB_NAME', 'contextforge'),
         user=os.environ.get('DB_USER', 'contextforge'),
         password=os.environ.get('DB_PASSWORD', ''),
-        host='/cloudsql/junlinleather-mcp:asia-southeast1:contextforge'
+        host='/cloudsql/' + os.environ.get('CLOUDSQL_INSTANCE', '')
     )
     cur = conn.cursor()
     cur.execute('SELECT access_token_encrypted FROM shopify_installations WHERE shop_domain = %s AND status = %s',
@@ -219,9 +233,9 @@ start_and_verify "ContextForge" "$CONTEXTFORGE_PID"
 
 # 3. dev-mcp bridge (stdio→SSE)
 /app/.venv/bin/python -m mcpgateway.translate \
-  --stdio "npx -y @shopify/dev-mcp@1.7.1" \
+  --stdio "npx -y @shopify/dev-mcp@${DEVMCP_VERSION}" \
   --expose-sse \
-  --port 8003 &
+  --port "$DEVMCP_PORT" &
 TRANSLATE_DEVMCP_PID=$!
 PIDS+=("$TRANSLATE_DEVMCP_PID")
 echo "$TRANSLATE_DEVMCP_PID" > /tmp/devmcp.pid
@@ -229,9 +243,9 @@ start_and_verify "dev-mcp bridge" "$TRANSLATE_DEVMCP_PID"
 
 # 4. google-sheets bridge (stdio→SSE)
 /app/.venv/bin/python -m mcpgateway.translate \
-  --stdio "uv tool run mcp-google-sheets@0.6.0 --transport stdio" \
+  --stdio "uv tool run mcp-google-sheets@${SHEETS_VERSION} --transport stdio" \
   --expose-sse \
-  --port 8004 &
+  --port "$SHEETS_PORT" &
 TRANSLATE_SHEETS_PID=$!
 PIDS+=("$TRANSLATE_SHEETS_PID")
 echo "$TRANSLATE_SHEETS_PID" > /tmp/sheets.pid
@@ -240,7 +254,7 @@ start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 # Verify google-sheets SSE endpoint is responding (not just the HTTP server)
 # SSE endpoints stream forever — curl exits 28 (timeout), not 0. Accept both.
 for probe_attempt in $(seq 1 15); do
-  probe_rc=0; curl -s --connect-timeout 2 --max-time 3 "http://127.0.0.1:8004/sse" -o /dev/null 2>/dev/null || probe_rc=$?
+  probe_rc=0; curl -s --connect-timeout 2 --max-time 3 "http://127.0.0.1:${SHEETS_PORT}/sse" -o /dev/null 2>/dev/null || probe_rc=$?
   if [ "$probe_rc" -eq 0 ] || [ "$probe_rc" -eq 28 ]; then
     echo "[fluid-intelligence] sheets SSE endpoint ready [+$(elapsed)s]"
     break
@@ -284,10 +298,10 @@ done
 # Risk is bounded: all processes run as UID 1001 in the same container.
 mcp-auth-proxy \
   --listen :8080 \
-  --external-url "https://${EXTERNAL_URL:-junlinleather.com}" \
+  --external-url "https://${EXTERNAL_URL:?EXTERNAL_URL must be set}" \
   --google-client-id "$GOOGLE_OAUTH_CLIENT_ID" \
   --google-client-secret "$GOOGLE_OAUTH_CLIENT_SECRET" \
-  --google-allowed-users "${GOOGLE_ALLOWED_USERS:-ourteam@junlinleather.com}" \
+  --google-allowed-users "${GOOGLE_ALLOWED_USERS:?GOOGLE_ALLOWED_USERS must be set}" \
   --password "$AUTH_PASSWORD" \
   --no-auto-tls \
   --data-path /app/data \
@@ -315,10 +329,10 @@ for p in "${PIDS[@]}"; do [ "$p" != "$BOOTSTRAP_PID" ] && NEW_PIDS+=("$p"); done
 PIDS=("${NEW_PIDS[@]}")
 
 echo "[fluid-intelligence] All services running [+$(elapsed)s]"
-echo "  Apollo:         PID=$APOLLO_PID  :8000"
+echo "  Apollo:         PID=$APOLLO_PID  :${APOLLO_PORT}"
 echo "  ContextForge:   PID=$CONTEXTFORGE_PID  :${CONTEXTFORGE_PORT}"
-echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :8003"
-echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :8004"
+echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :${DEVMCP_PORT}"
+echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :${SHEETS_PORT}"
 echo "  auth-proxy:     PID=$AUTHPROXY_PID  :8080"
 
 # --- Monitor: exit if any process dies ---

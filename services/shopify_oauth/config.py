@@ -30,7 +30,9 @@ class Settings:
 
     @property
     def DB_HOST(self) -> str:
-        return os.environ.get("DB_HOST", "/cloudsql/junlinleather-mcp:asia-southeast1:contextforge")
+        cloudsql = os.environ.get("CLOUDSQL_INSTANCE", "")
+        default_host = f"/cloudsql/{cloudsql}" if cloudsql else ""
+        return os.environ.get("DB_HOST", default_host)
 
     @property
     def SHOPIFY_API_VERSION(self) -> str:

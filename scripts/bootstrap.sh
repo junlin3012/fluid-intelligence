@@ -66,9 +66,19 @@ CF="http://127.0.0.1:${CONTEXTFORGE_PORT:-4444}"
 
 # Identity header for proxy auth mode (TRUST_PROXY_AUTH=true).
 # ContextForge expects X-Authenticated-User on all endpoints when proxy auth is active.
-# SSO_AUTO_CREATE_USERS=true + SSO_GOOGLE_ADMIN_DOMAINS=junlinleather.com auto-creates
-# and auto-promotes this user to admin on first request.
+# SSO_AUTO_CREATE_USERS + SSO_GOOGLE_ADMIN_DOMAINS auto-create and auto-promote on first request.
 PROXY_AUTH_HEADER="X-Authenticated-User: ${PLATFORM_ADMIN_EMAIL}"
+
+# Service ports (inherit from entrypoint.sh exports or use defaults)
+APOLLO_PORT="${APOLLO_PORT:-8000}"
+DEVMCP_PORT="${DEVMCP_PORT:-8003}"
+SHEETS_PORT="${SHEETS_PORT:-8004}"
+
+# Primary user for team/role assignment (set via env var, never hardcoded)
+PRIMARY_USER_EMAIL="${PRIMARY_USER_EMAIL:-${GOOGLE_ALLOWED_USERS%%,*}}"
+
+# Virtual server name
+VIRTUAL_SERVER_NAME="${VIRTUAL_SERVER_NAME:-fluid-intelligence}"
 
 # Fast-fail: verify ContextForge is still alive before expensive registration attempts
 check_contextforge() {
@@ -154,7 +164,7 @@ for i in $(seq 1 60); do
   fi
   # Apollo streamable_http: check if port 8000 accepts connections
   # Use -s (no -f) so any HTTP response = server is up (even 404/405)
-  rc=0; curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/mcp 2>/dev/null || rc=$?
+  rc=0; curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:${APOLLO_PORT}/mcp 2>/dev/null || rc=$?
   [ "$rc" -eq 0 ] && { echo "[bootstrap] Apollo ready after ${i}s"; break; }
   [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: Apollo not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
@@ -162,7 +172,7 @@ done
 
 check_contextforge
 echo "[bootstrap] Registering Apollo MCP (Shopify GraphQL)..."
-register_gateway "apollo-shopify" "http://127.0.0.1:8000/mcp" "STREAMABLEHTTP"
+register_gateway "apollo-shopify" "http://127.0.0.1:${APOLLO_PORT}/mcp" "STREAMABLEHTTP"
 
 # Wait for dev-mcp bridge (npx install can take 30-60s on cold start)
 # healthz only checks the bridge HTTP server, not the underlying MCP subprocess.
@@ -177,10 +187,10 @@ for i in $(seq 1 120); do
     fi
   fi
   # Check both healthz AND SSE endpoint (SSE returns 200 only when MCP subprocess is connected)
-  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/healthz > /dev/null 2>&1 || rc=$?
+  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:${DEVMCP_PORT}/healthz > /dev/null 2>&1 || rc=$?
   if [ "$rc" -eq 0 ]; then
     # Bridge HTTP is up — now verify MCP subprocess is actually ready via SSE probe
-    sse_rc=0; curl -s --connect-timeout 2 --max-time 3 http://127.0.0.1:8003/sse -o /dev/null 2>&1 || sse_rc=$?
+    sse_rc=0; curl -s --connect-timeout 2 --max-time 3 http://127.0.0.1:${DEVMCP_PORT}/sse -o /dev/null 2>&1 || sse_rc=$?
     # SSE returns 200 (streaming) which curl sees as timeout (28) = subprocess ready
     if [ "$sse_rc" -eq 0 ] || [ "$sse_rc" -eq 28 ]; then
       echo "[bootstrap] dev-mcp bridge ready (healthz + SSE confirmed) after ${i}s"
@@ -193,7 +203,7 @@ done
 
 check_contextforge
 echo "[bootstrap] Registering dev-mcp (Shopify docs)..."
-register_gateway "shopify-dev-mcp" "http://127.0.0.1:8003/sse" "SSE"
+register_gateway "shopify-dev-mcp" "http://127.0.0.1:${DEVMCP_PORT}/sse" "SSE"
 
 # Wait for google-sheets bridge
 echo "[bootstrap] Waiting for google-sheets bridge..."
@@ -205,7 +215,7 @@ for i in $(seq 1 60); do
       exit 1
     fi
   fi
-  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:8004/healthz > /dev/null 2>&1 || rc=$?
+  rc=0; curl -sf --connect-timeout 2 --max-time 3 http://127.0.0.1:${SHEETS_PORT}/healthz > /dev/null 2>&1 || rc=$?
   [ "$rc" -eq 0 ] && { echo "[bootstrap] google-sheets bridge ready after ${i}s"; break; }
   [ "$i" -eq 60 ] && { echo "[bootstrap] FATAL: google-sheets bridge not ready after 60s (last curl rc=$rc)"; exit 1; }
   sleep 1
@@ -213,7 +223,7 @@ done
 
 check_contextforge
 echo "[bootstrap] Registering google-sheets..."
-register_gateway "google-sheets" "http://127.0.0.1:8004/sse" "SSE"
+register_gateway "google-sheets" "http://127.0.0.1:${SHEETS_PORT}/sse" "SSE"
 
 # Verify tools discovered — poll until count stabilizes (async discovery race)
 echo "[bootstrap] All 3 backends registered, waiting for tool discovery..."
@@ -254,7 +264,7 @@ echo "[bootstrap] Creating virtual server..."
 # Delete existing virtual servers (stale from previous deploy — could be multiple)
 existing_vs_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
   "$CF/servers" 2>/dev/null | \
-  jq -r '.[] | select(.name=="fluid-intelligence") | .id' 2>/dev/null) || true
+  jq -r '.[] | select(.name=="'"$VIRTUAL_SERVER_NAME"'") | .id' 2>/dev/null) || true
 if [ -n "$existing_vs_ids" ]; then
   echo "$existing_vs_ids" | while read -r vs_id; do
     [ -z "$vs_id" ] || [ "$vs_id" = "null" ] && continue
@@ -276,8 +286,8 @@ if [ "$TOOL_IDS" = "[]" ]; then
 fi
 
 # Create virtual server with all tools
-vs_payload=$(jq -n --argjson tools "$TOOL_IDS" \
-  '{server: {name: "fluid-intelligence", description: "All Shopify + Google Sheets tools", associated_tools: $tools}}')
+vs_payload=$(jq -n --argjson tools "$TOOL_IDS" --arg name "$VIRTUAL_SERVER_NAME" \
+  '{server: {name: $name, description: "All registered backend tools", associated_tools: $tools}}')
 vs_curl_err="/tmp/bootstrap-vs-curl-err-$$.log"
 vs_response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
   -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
@@ -437,27 +447,27 @@ ADMIN_TEAM_ID=$(create_team "admin" "Full access to all backends")
 VIEWER_TEAM_ID=$(create_team "viewer" "Read-only Shopify access")
 
 # === User + Role Assignment ===
-# Note: SSO_AUTO_CREATE_USERS=true auto-creates users on first login.
-# SSO_GOOGLE_ADMIN_DOMAINS=junlinleather.com auto-promotes to admin.
-# So role assignment happens automatically when a user first authenticates
-# via Google OAuth. Bootstrap only pre-assigns team membership IF the user
-# already exists (e.g., after first login).
+# SSO_AUTO_CREATE_USERS=true auto-creates users on first OAuth login.
+# SSO_GOOGLE_ADMIN_DOMAINS auto-promotes matching domain users to admin.
+# Bootstrap only pre-assigns team membership IF the user already exists.
 
-# Check if the primary user exists before attempting team/role assignment
-primary_user="ourteam@junlinleather.com"
-user_exists=$(curl -sf -L --connect-timeout 2 --max-time 10 \
-  -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
-  "$CF/rbac/users/$primary_user/" 2>/dev/null | jq -r '.email // empty' 2>/dev/null) || true
+if [ -n "$PRIMARY_USER_EMAIL" ]; then
+  user_exists=$(curl -sf -L --connect-timeout 2 --max-time 10 \
+    -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
+    "$CF/rbac/users/$PRIMARY_USER_EMAIL/" 2>/dev/null | jq -r '.email // empty' 2>/dev/null) || true
 
-if [ "$user_exists" = "$primary_user" ]; then
-  echo "[bootstrap] User $primary_user exists — assigning team + role"
-  if [ -n "$ADMIN_TEAM_ID" ]; then
-    add_user_to_team "$ADMIN_TEAM_ID" "$primary_user" "owner"
+  if [ "$user_exists" = "$PRIMARY_USER_EMAIL" ]; then
+    echo "[bootstrap] User $PRIMARY_USER_EMAIL exists — assigning team + role"
+    if [ -n "$ADMIN_TEAM_ID" ]; then
+      add_user_to_team "$ADMIN_TEAM_ID" "$PRIMARY_USER_EMAIL" "owner"
+    fi
+    assign_role "$PRIMARY_USER_EMAIL" "platform_admin" "global"
+  else
+    echo "[bootstrap] User $PRIMARY_USER_EMAIL not yet created (will be auto-created on first OAuth login)"
+    echo "[bootstrap]   SSO_GOOGLE_ADMIN_DOMAINS will auto-promote to admin"
   fi
-  assign_role "$primary_user" "platform_admin" "global"
 else
-  echo "[bootstrap] User $primary_user not yet created (will be auto-created on first OAuth login)"
-  echo "[bootstrap]   SSO_GOOGLE_ADMIN_DOMAINS=junlinleather.com will auto-promote to admin"
+  echo "[bootstrap] PRIMARY_USER_EMAIL not set — skipping user/role assignment"
 fi
 
 # Example: add a viewer later
