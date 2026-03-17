@@ -373,21 +373,44 @@ add_user_to_team() {
     "$CF/teams/$team_id/members/" 2>/dev/null) || true
 
   http_code=$(parse_http_code "$response")
+  body=$(echo "$response" | sed '$d')
   if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
     echo "[bootstrap] Added $email to team (role=$role)"
   elif [ "$http_code" -eq 409 ]; then
     echo "[bootstrap] $email already in team"
   else
-    echo "[bootstrap] WARNING: Failed to add $email to team (HTTP $http_code)"
+    echo "[bootstrap] WARNING: Failed to add $email to team (HTTP $http_code): $(echo "$body" | head -c 200)"
   fi
+}
+
+# --- Look up role ID by name ---
+get_role_id() {
+  local role_name="$1"
+  curl -sf -L --connect-timeout 2 --max-time 10 \
+    -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
+    "$CF/rbac/roles/" 2>/dev/null | \
+    jq -r --arg n "$role_name" '.[] | select(.name==$n) | .id' 2>/dev/null | head -1
 }
 
 # --- Assign role to user (idempotent) ---
 assign_role() {
   local email="$1" role_name="$2" scope="$3" scope_id="${4:-}"
+
+  # ContextForge RBAC API requires role_id, not role_name
+  local role_id
+  role_id=$(get_role_id "$role_name")
+  if [ -z "$role_id" ] || [ "$role_id" = "null" ]; then
+    echo "[bootstrap] WARNING: Role '$role_name' not found — cannot assign to $email"
+    echo "[bootstrap]   Available roles:"
+    curl -sf -L --connect-timeout 2 --max-time 10 \
+      -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
+      "$CF/rbac/roles/" 2>/dev/null | jq -r '.[].name' 2>/dev/null | sed 's/^/    /' || echo "    (failed to list)"
+    return
+  fi
+
   local payload
-  payload=$(jq -n --arg r "$role_name" --arg s "$scope" --arg si "$scope_id" \
-    '{role_name: $r, scope: $s, scope_id: (if $si == "" then null else $si end)}')
+  payload=$(jq -n --arg r "$role_id" --arg s "$scope" --arg si "$scope_id" \
+    '{role_id: $r, scope: $s, scope_id: (if $si == "" then null else $si end)}')
 
   response=$(curl -s -L -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
     -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
@@ -396,12 +419,13 @@ assign_role() {
     "$CF/rbac/users/$email/roles/" 2>/dev/null) || true
 
   http_code=$(parse_http_code "$response")
+  body=$(echo "$response" | sed '$d')
   if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
     echo "[bootstrap] Assigned role '$role_name' ($scope) to $email"
   elif [ "$http_code" -eq 409 ]; then
     echo "[bootstrap] $email already has role '$role_name'"
   else
-    echo "[bootstrap] WARNING: Failed to assign role to $email (HTTP $http_code)"
+    echo "[bootstrap] WARNING: Failed to assign role '$role_name' to $email (HTTP $http_code): $(echo "$body" | head -c 200)"
   fi
 }
 
