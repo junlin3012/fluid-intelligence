@@ -166,7 +166,7 @@ When all three conditions are met, ContextForge trusts the identity header:
 | AUTH_ENCRYPTION_SECRET | GCP Secret Manager | ContextForge DB encryption (separate from JWT) |
 | DB_PASSWORD | GCP Secret Manager | PostgreSQL connection |
 
-**Known limitation**: auth-proxy passes `--password` and `--google-client-secret` via CLI args, visible in `/proc/cmdline`. Bounded risk: all processes run as UID 1001 in the same container.
+**Secrets**: auth-proxy reads `PASSWORD` and `GOOGLE_CLIENT_SECRET` from environment variables (set via `export` in entrypoint.sh). No secrets are passed via CLI args — `/proc/cmdline` is clean.
 
 ### 6. Binary Integrity
 All downloaded binaries are SHA256-verified in Dockerfile.base:

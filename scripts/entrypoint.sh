@@ -10,6 +10,19 @@ fi
 START_TIME=$(date +%s)
 elapsed() { echo $(( $(date +%s) - START_TIME )); }
 
+# --- Structured logging helper ---
+# JSON when STRUCTURED_LOGGING=true (Cloud Run), plaintext otherwise (local dev).
+# Uses jq for safe JSON escaping (handles quotes, newlines in messages).
+log() {
+  local level="${1:-INFO}" msg="$2"
+  if [ "${STRUCTURED_LOGGING:-false}" = "true" ]; then
+    jq -nc --arg s "$level" --arg m "$msg" --arg c "entrypoint" \
+      '{severity:$s,message:$m,timestamp:(now|strftime("%Y-%m-%dT%H:%M:%SZ")),component:$c}'
+  else
+    echo "[fluid-intelligence] $msg"
+  fi
+}
+
 # --- Load structural defaults (Layer 2) ---
 # Uses ${VAR:=default} syntax — only sets vars not already set by Cloud Run (Layer 3).
 DEFAULTS_FILE="/app/config/defaults.env"
@@ -297,17 +310,15 @@ for i in $(seq 1 "$CF_HEALTH_TIMEOUT"); do
 done
 
 # 5. mcp-auth-proxy (Go, OAuth 2.1 front door) — starts after ContextForge is ready
-# SECURITY NOTE: --password and --google-client-secret are passed via CLI args,
-# which exposes them in /proc/cmdline. This is a known limitation of mcp-auth-proxy v2.5.4.
-# TODO: Check if future versions support env var or config file for secrets.
-# Risk is bounded: all processes run as UID 1001 in the same container.
+# Secrets passed via env vars (not CLI args) to avoid /proc/cmdline exposure.
+# auth-proxy (Cobra) reads these via getEnvWithDefault() fallbacks.
+export PASSWORD="$AUTH_PASSWORD"
+export GOOGLE_CLIENT_SECRET="$GOOGLE_OAUTH_CLIENT_SECRET"
 mcp-auth-proxy \
   --listen :8080 \
   --external-url "https://${EXTERNAL_URL}" \
   --google-client-id "$GOOGLE_OAUTH_CLIENT_ID" \
-  --google-client-secret "$GOOGLE_OAUTH_CLIENT_SECRET" \
   --google-allowed-users "$GOOGLE_ALLOWED_USERS" \
-  --password "$AUTH_PASSWORD" \
   --no-auto-tls \
   --data-path /app/data \
   -- "http://127.0.0.1:${CONTEXTFORGE_PORT}" &
@@ -343,10 +354,30 @@ echo "  dev-mcp:        PID=$TRANSLATE_DEVMCP_PID  :${DEVMCP_PORT}"
 echo "  sheets:         PID=$TRANSLATE_SHEETS_PID  :${SHEETS_PORT}"
 echo "  auth-proxy:     PID=$AUTHPROXY_PID  :8080"
 
+# --- Health watchdog: detect dead bridge subprocesses ---
+# ContextForge's circuit breaker handles tool-call failures (5 failures → 60s cooldown).
+# The watchdog catches process death that wait -n monitors can't see through bridges.
+# Watchdog exit triggers wait -n → container restart → full recovery.
+health_watchdog() {
+  while true; do
+    sleep 30
+    for pidfile in /tmp/apollo.pid /tmp/devmcp.pid /tmp/sheets.pid; do
+      pid=$(cat "$pidfile" 2>/dev/null)
+      if [ -n "$pid" ] && [[ "$pid" =~ ^[0-9]+$ ]] && ! kill -0 "$pid" 2>/dev/null; then
+        name=$(basename "$pidfile" .pid)
+        echo "[watchdog] FATAL: $name (PID $pid) died"
+        exit 1
+      fi
+    done
+  done
+}
+health_watchdog &
+WATCHDOG_PID=$!
+
 # --- Monitor: exit if any process dies ---
 # Disable set -e: wait -n returns error if a PID was already reaped (race condition)
 set +e
-wait -n "$APOLLO_PID" "$CONTEXTFORGE_PID" "$TRANSLATE_DEVMCP_PID" "$TRANSLATE_SHEETS_PID" "$AUTHPROXY_PID"
+wait -n "$APOLLO_PID" "$CONTEXTFORGE_PID" "$TRANSLATE_DEVMCP_PID" "$TRANSLATE_SHEETS_PID" "$AUTHPROXY_PID" "$WATCHDOG_PID"
 FIRST_EXIT=$?
 set -e
 

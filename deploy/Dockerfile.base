@@ -55,10 +55,14 @@ COPY --from=apollo-builder /src/target/release/apollo-mcp-server /usr/local/bin/
 COPY --from=authproxy /mcp-auth-proxy /usr/local/bin/mcp-auth-proxy
 RUN chmod 755 /usr/local/bin/apollo /usr/local/bin/mcp-auth-proxy
 
-# Verify ContextForge venv is intact
+# Cloud Trace exporter (for distributed tracing via OTEL)
+RUN uv pip install --python /app/.venv/bin/python opentelemetry-exporter-gcp-trace
+
+# Verify ContextForge venv is intact (each check catches a different failure mode)
 RUN /app/.venv/bin/python -c "from mcpgateway.cli import main; print('✓ mcpgateway OK')"
 RUN /app/.venv/bin/python -c "import psycopg2; print('✓ psycopg2 OK')"
 RUN /app/.venv/bin/python -c "from cryptography.hazmat.primitives.ciphers.aead import AESGCM; print('✓ cryptography OK')"
+RUN /app/.venv/bin/python -c "from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter; print('✓ gcp-trace OK')"
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R 1001:0 /app

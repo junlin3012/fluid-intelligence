@@ -1164,7 +1164,7 @@ else
 fi
 
 # R5: PID files cleaned at startup (idempotency)
-if head -60 $REPO_ROOT/scripts/entrypoint.sh | grep -q 'rm.*apollo.pid'; then
+if head -80 $REPO_ROOT/scripts/entrypoint.sh | grep -q 'rm.*apollo.pid'; then
   pass "entrypoint.sh cleans stale PID files at startup"
 else
   fail "entrypoint.sh cleans stale PID files at startup" "stale PID files from previous run cause false crash detection"
