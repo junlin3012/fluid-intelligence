@@ -54,7 +54,7 @@
 - **Auth**: Bearer JWT in Authorization header
 - **Gateway body**: `{"name": "...", "url": "...", "transport": "SSE"}`
 - **Server body**: `{"server": {"name": "...", "description": "...", "associated_tools": [...]}}`
-- **Transports**: `SSE` for all backends (Apollo, dev-mcp, sheets). ContextForge's MCP client has a bug with `streamablehttp` transport — use `SSE` until fixed.
+- **Transports**: `STREAMABLEHTTP` for Apollo (native on port 8000), `SSE` for dev-mcp and sheets (translate bridges). Apollo serves MCP directly via streamable_http — no translate bridge needed.
 - **Re-registration**: bootstrap.sh deletes stale gateways before re-registering to pick up URL/transport changes
 - **Idempotent**: 409 = already exists, treated as success
 

@@ -45,7 +45,7 @@ Traffic flow: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backen
 | `DATABASE_URL` | — | PostgreSQL connection string |
 | `AUTH_ENCRYPTION_SECRET` | — | JWT signing secret |
 | `PLATFORM_ADMIN_PASSWORD` | — | Admin API password |
-| `AUTH_REQUIRED` | true | **Set to `true`** — ContextForge enforces auth internally. Proxy auth mode: `TRUST_PROXY_AUTH=true` + `PROXY_USER_HEADER=X-Authenticated-User` |
+| `AUTH_REQUIRED` | false | **Set to `false`** — auth-proxy handles ALL external auth. ContextForge trusts internal traffic. With `true`, ContextForge rejects requests where auth-proxy stripped the Authorization header (the "Double-Auth Problem" from failure-log.md). |
 | `TRUST_PROXY_AUTH` | false | When `true` + `TRUST_PROXY_AUTH_DANGEROUSLY=true` + `MCP_CLIENT_AUTH_ENABLED=false`, ContextForge trusts the identity header from auth-proxy |
 | `PROXY_USER_HEADER` | X-Authenticated-User | Header name that auth-proxy sets with the user's email after JWT validation |
 | `SSO_AUTO_CREATE_USERS` | false | When `true`, auto-creates EmailUser on first request from unknown user |
@@ -107,6 +107,11 @@ Client → auth-proxy validates JWT → extracts sub=ourteam@junlinleather.com
 ```
 
 **Fork repo**: `junlin3012/mcp-auth-proxy` (branch: `identity-forwarding`, tag: `v2.5.4-identity`)
+
+**Known gaps (as of 2026-03-18):**
+- **E2E verification pending**: The identity chain has been deployed but never verified end-to-end with a real Google OAuth login. Verify by: (1) logging in via Google OAuth, (2) checking auth-proxy logs for `sub` claim in JWT, (3) checking ContextForge logs for X-Authenticated-User resolution, (4) checking audit trail for user_email.
+- **Header name coupling**: The `X-Authenticated-User` header name is hardcoded in the auth-proxy Go fork (proxy.go). ContextForge reads it from `PROXY_USER_HEADER` env var. Changing the header name requires updating both — they are not dynamically linked.
+- **PLATFORM_ADMIN_EMAIL vs GOOGLE_ALLOWED_USERS**: Bootstrap uses `admin@junlinleather.com` as the admin identity, but only `ourteam@junlinleather.com` can authenticate via Google OAuth. The bootstrap admin is a phantom identity that works internally but can never log in. Consider aligning `PLATFORM_ADMIN_EMAIL` with the actual admin user.
 
 ## Security Protocols
 
@@ -192,6 +197,7 @@ Updating a binary requires: recompile → record new hash → update Dockerfile.
 - Root cause: Unknown bug in Apollo's file-loading/schema-tree-shaking pipeline, likely related to the complexity of Order/Customer type graphs (55+ dependent types)
 - **Workaround**: Enable `introspection.execute` and `introspection.validate` in `mcp-config.yaml`. The AI dynamically composes and executes queries via the `execute` tool — this is MORE powerful than predefined operations
 - Mutations are also skipped by default; can be enabled with `overrides.mutation_mode: explicit`
+- **Note on StreamableHTTP**: Earlier failure-log entries reference `Protocols: SSE=True, StreamableHTTP=False` — this was a ContextForge translate bridge limitation. Apollo now serves native streamable_http (no bridge), and ContextForge connects to it directly via STREAMABLEHTTP transport. The limitation only affected the stdio→SSE bridge path.
 
 ### 3. Cloud Run PORT is immutable
 - Cloud Run injects `PORT=8080` — you cannot override it

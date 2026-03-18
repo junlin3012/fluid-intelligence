@@ -86,6 +86,14 @@
 - **Workaround**: Enable `introspection.execute` and `introspection.validate` in `mcp-config.yaml`. The AI can dynamically compose and execute any query via the `execute` tool — which is actually MORE powerful than predefined operations.
 - **Lesson**: When a tool silently drops valid inputs, don't keep testing variations of the input. Enable the tool's diagnostic features (introspection, validate, execute) and bypass the broken pipeline. Apollo's execute tool is the correct long-term approach — it gives the AI unlimited query flexibility rather than being locked to predefined operations.
 
+## 2026-03-18: AUTH_REQUIRED=true Regression — Double-Auth Problem Returned
+
+- **What happened**: E2E tests showed ALL MCP endpoints returning `{"detail":"Authentication required for MCP endpoints"}` (HTTP 401 from ContextForge). OAuth flow worked perfectly — token obtained, auth-proxy validated it — but MCP requests failed.
+- **Root cause**: `AUTH_REQUIRED=true` was re-introduced in `cloudbuild.yaml` during the identity forwarding work. This caused the exact same "Double-Auth Problem" documented earlier: auth-proxy strips the Authorization header before forwarding (to prevent HMAC/RS256 conflict), but `AUTH_REQUIRED=true` makes ContextForge reject requests without a Bearer token. The `TRUST_PROXY_AUTH=true` setting provides identity but does NOT satisfy `AUTH_REQUIRED`.
+- **How it should have been caught**: The failure-log.md entry "Double-Auth Problem" explicitly documented the fix as `AUTH_REQUIRED=false`. The identity forwarding commits changed it back to `true` without testing the end-to-end flow. E2E tests should have been run after every config change.
+- **What changed**: Set `AUTH_REQUIRED=false` in cloudbuild.yaml (again). Updated system-understanding.md to explain WHY it must be false.
+- **Lesson**: `AUTH_REQUIRED` and `TRUST_PROXY_AUTH` are independent settings. `AUTH_REQUIRED=true` requires a Bearer token on ALL requests. `TRUST_PROXY_AUTH` only provides identity resolution. When auth-proxy strips the Authorization header, `AUTH_REQUIRED=true` will ALWAYS fail. This is not a "maybe" — it is a logical impossibility. **AUTH_REQUIRED must be false when using auth-proxy with header stripping.**
+
 ## 2026-03-15: OAuth Flow Uses Cookie-Based Login, Not HTTP Basic Auth
 
 - **What happened**: E2E test scripts initially used `curl -u user:password` for OAuth authentication. This worked for some MCP auth proxies but the current mcp-auth-proxy v2.5.4 uses a cookie-based login form. The auth endpoint (`.idp/auth`) returns a 302 redirect to a login page (`.auth/login`), which must be POSTed to with `password=...` using a session cookie.

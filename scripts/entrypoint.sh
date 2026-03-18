@@ -44,7 +44,7 @@ cleanup() {
     wait "$pid" 2>/dev/null || true
   done
   # Clean up temp files (only entrypoint's own — bootstrap uses its own $$ for JWT/curl temp files)
-  rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log /tmp/db-token-err-$$.log
+  rm -f /tmp/shopify-curl-err-$$.log /tmp/jq-err-$$.log /tmp/db-token-err-$$.log /tmp/encode-err-$$.log
   rm -f /tmp/apollo.pid /tmp/devmcp.pid /tmp/sheets.pid
   exit 143  # 128 + 15 (SIGTERM)
 }
@@ -87,11 +87,14 @@ fi
 
 # --- Env var wiring ---
 # URL-encode DB_PASSWORD to handle special chars (@, ?, /, %) that break connection strings
-encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))")
+encoded_pw=$(DB_PASSWORD="$DB_PASSWORD" /app/.venv/bin/python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['DB_PASSWORD'], safe=''))" 2>/tmp/encode-err-$$.log)
 if [ -z "$encoded_pw" ]; then
   echo "[fluid-intelligence] FATAL: URL-encoding DB_PASSWORD produced empty result"
+  [ -f /tmp/encode-err-$$.log ] && [ -s /tmp/encode-err-$$.log ] && echo "[fluid-intelligence]   python error: $(cat /tmp/encode-err-$$.log)"
+  rm -f /tmp/encode-err-$$.log
   exit 1
 fi
+rm -f /tmp/encode-err-$$.log
 export DATABASE_URL="${DATABASE_URL:-postgresql://${DB_USER}:${encoded_pw}@/${DB_NAME}?host=/cloudsql/${CLOUDSQL_INSTANCE}}"
 # Use dedicated secret for ContextForge DB encryption (decoupled from JWT signing key).
 # Fall back to JWT_SECRET_KEY for backward compat during migration.
@@ -141,6 +144,8 @@ if [ -n "$DB_TOKEN" ] && [[ "$DB_TOKEN" == shp* ]]; then
   rm -f /tmp/db-token-err-$$.log
 else
   echo "[fluid-intelligence] No token in Cloud SQL, falling back to client_credentials..."
+  echo "[fluid-intelligence] WARNING: client_credentials tokens expire in 24h — no refresh mechanism"
+  echo "[fluid-intelligence]   For persistent operation, install the Shopify OAuth app to store a permanent token in Cloud SQL"
   [ -f /tmp/db-token-err-$$.log ] && [ -s /tmp/db-token-err-$$.log ] && echo "[fluid-intelligence]   DB error: $(cat /tmp/db-token-err-$$.log)"
   rm -f /tmp/db-token-err-$$.log
 
@@ -249,15 +254,18 @@ echo "$TRANSLATE_SHEETS_PID" > /tmp/sheets.pid
 start_and_verify "sheets bridge" "$TRANSLATE_SHEETS_PID"
 
 # Verify google-sheets SSE endpoint is responding (not just the HTTP server)
-# SSE endpoints stream forever — curl exits 28 (timeout), not 0. Accept both.
-for probe_attempt in $(seq 1 15); do
+# SSE endpoints stream forever — curl exits 28 (timeout) when the stream is active.
+# Exit 0 means the connection CLOSED immediately (likely an error), so only accept 28.
+for probe_attempt in $(seq 1 30); do
   probe_rc=0; curl -s --connect-timeout 2 --max-time 3 "http://127.0.0.1:${SHEETS_PORT}/sse" -o /dev/null 2>/dev/null || probe_rc=$?
-  if [ "$probe_rc" -eq 0 ] || [ "$probe_rc" -eq 28 ]; then
-    echo "[fluid-intelligence] sheets SSE endpoint ready [+$(elapsed)s]"
+  if [ "$probe_rc" -eq 28 ]; then
+    echo "[fluid-intelligence] sheets SSE endpoint ready (streaming) [+$(elapsed)s]"
     break
   fi
-  if [ "$probe_attempt" -eq 15 ]; then
-    echo "[fluid-intelligence] WARNING: sheets SSE endpoint not responding after 30s (last curl rc=$probe_rc)"
+  if [ "$probe_attempt" -eq 30 ]; then
+    echo "[fluid-intelligence] FATAL: sheets SSE endpoint not responding after 60s (last curl rc=$probe_rc)"
+    for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
+    exit 1
   fi
   sleep 2
 done
@@ -265,8 +273,8 @@ done
 # --- Wait for ContextForge health before starting auth proxy ---
 echo "[fluid-intelligence] Waiting for ContextForge to be ready..."
 # ContextForge health timeout must fit within Cloud Run startup probe (240s).
-# Budget: ~115s already elapsed (token fetch + process starts), so ContextForge gets 120s max.
-# Previous value of 180s exceeded the 240s probe, causing pod kills on slow starts.
+# Budget: ~15-20s already elapsed (token fetch + process starts), so ContextForge gets 120s max.
+# Combined with ~20s elapsed, total is ~140s — well within the 240s startup probe budget.
 CF_HEALTH_TIMEOUT=120
 for i in $(seq 1 "$CF_HEALTH_TIMEOUT"); do
   if curl -sf --connect-timeout 2 --max-time 5 "http://127.0.0.1:${CONTEXTFORGE_PORT}/health" > /dev/null 2>&1; then
@@ -321,9 +329,12 @@ wait "$BOOTSTRAP_PID" || {
 }
 # Remove completed bootstrap PID from PIDS to avoid killing a reused PID
 # Use exact match loop (not substring replacement which corrupts e.g. PID 12 inside 1234)
+# Disable trap during rebuild to prevent SIGTERM from seeing inconsistent PIDS array
+trap '' SIGTERM SIGINT
 NEW_PIDS=()
 for p in "${PIDS[@]}"; do [ "$p" != "$BOOTSTRAP_PID" ] && NEW_PIDS+=("$p"); done
 PIDS=("${NEW_PIDS[@]}")
+trap cleanup SIGTERM SIGINT
 
 echo "[fluid-intelligence] All services running [+$(elapsed)s]"
 echo "  Apollo:         PID=$APOLLO_PID  :${APOLLO_PORT}"

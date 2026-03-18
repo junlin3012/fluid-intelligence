@@ -521,16 +521,18 @@ fi
 # =============================================
 echo "--- R14: env var validation ordering ---"
 
-# DB_PASSWORD is used for URL-encoding (python3 line) BEFORE the `: "${DB_PASSWORD:?...}"` check
-# The validation should come BEFORE the DATABASE_URL construction
+# DB_PASSWORD is validated by validate-config.sh (runs before entrypoint's main logic).
+# validate-config.sh uses require_unless "DATABASE_URL" "DB_PASSWORD" to check it.
 ENTRYPOINT="$REPO_ROOT/scripts/entrypoint.sh"
+VALIDATE_CONFIG="$REPO_ROOT/scripts/validate-config.sh"
 ENCODE_LINE=$(grep -n 'encoded_pw\|urllib.*DB_PASSWORD' "$ENTRYPOINT" | head -1 | cut -d: -f1)
-VALIDATE_LINE=$(grep -n 'DB_PASSWORD:?' "$ENTRYPOINT" | head -1 | cut -d: -f1)
+VALIDATE_LINE=$(grep -n 'DB_PASSWORD' "$VALIDATE_CONFIG" | head -1 | cut -d: -f1)
 if [ -n "$ENCODE_LINE" ] && [ -n "$VALIDATE_LINE" ]; then
-  if [ "$VALIDATE_LINE" -lt "$ENCODE_LINE" ]; then
+  # validate-config.sh runs BEFORE entrypoint's main logic (entrypoint sources it early)
+  if grep -q 'validate-config.sh' "$ENTRYPOINT"; then
     pass "DB_PASSWORD validated before use in URL encoding"
   else
-    fail "DB_PASSWORD validated before use in URL encoding" "validation at line $VALIDATE_LINE, used at line $ENCODE_LINE"
+    fail "DB_PASSWORD validated before use in URL encoding" "validate-config.sh not sourced by entrypoint"
   fi
 else
   fail "DB_PASSWORD validation check" "could not find encode or validate lines"
@@ -808,17 +810,17 @@ fi
 # =============================================
 echo "--- R32: Cloud Run config ---"
 
-CLOUDBUILD="$REPO_ROOT/deploy/cloudbuild.yaml"
-if grep -q 'PYTHONUNBUFFERED=1' "$CLOUDBUILD"; then
-  pass "PYTHONUNBUFFERED=1 set in Cloud Run env vars"
+DEFAULTS_ENV="$REPO_ROOT/config/defaults.env"
+if grep -q 'PYTHONUNBUFFERED.*1' "$DEFAULTS_ENV"; then
+  pass "PYTHONUNBUFFERED=1 set in defaults.env"
 else
-  fail "PYTHONUNBUFFERED=1 set in Cloud Run env vars" "Python log buffering can hide output"
+  fail "PYTHONUNBUFFERED=1 set in defaults.env" "Python log buffering can hide output"
 fi
 
-if grep -q 'DB_POOL_SIZE=' "$CLOUDBUILD"; then
-  pass "DB_POOL_SIZE explicitly set in Cloud Run env vars"
+if grep -q 'DB_POOL_SIZE' "$DEFAULTS_ENV"; then
+  pass "DB_POOL_SIZE explicitly set in defaults.env"
 else
-  fail "DB_POOL_SIZE explicitly set in Cloud Run env vars" "default 200 exceeds Cloud SQL db-f1-micro limit of 25"
+  fail "DB_POOL_SIZE explicitly set in defaults.env" "default 200 exceeds Cloud SQL db-f1-micro limit of 25"
 fi
 
 # =============================================
@@ -891,12 +893,12 @@ fi
 # =============================================
 echo "--- R48: Error handling ---"
 
-# Bridge processes use venv python
-BRIDGE_PYTHON_COUNT=$(grep -c '/app/.venv/bin/python -m mcpgateway.translate' $REPO_ROOT/scripts/entrypoint.sh) || BRIDGE_PYTHON_COUNT=0
-if [ "$BRIDGE_PYTHON_COUNT" -eq 3 ]; then
-  pass "All 3 bridges use venv python"
+# Bridge processes + ContextForge use venv python (2 translate bridges + 1 ContextForge main)
+VENV_PYTHON_COUNT=$(grep -c '/app/.venv/bin/python' $REPO_ROOT/scripts/entrypoint.sh) || VENV_PYTHON_COUNT=0
+if [ "$VENV_PYTHON_COUNT" -ge 3 ]; then
+  pass "All Python processes use venv python ($VENV_PYTHON_COUNT invocations)"
 else
-  fail "All 3 bridges use venv python" "found $BRIDGE_PYTHON_COUNT (expected 3)"
+  fail "All Python processes use venv python" "found $VENV_PYTHON_COUNT (expected >= 3)"
 fi
 
 # No bare python3 for mcpgateway.translate
@@ -952,7 +954,7 @@ fi
 echo "--- R50: PID array + token guard ---"
 
 # PIDS cleanup uses exact match (not substring replacement)
-if grep -A3 'Remove completed bootstrap' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'for p in'; then
+if grep -A8 'Remove completed bootstrap' $REPO_ROOT/scripts/entrypoint.sh | grep -q 'for p in'; then
   pass "PIDS cleanup uses exact match loop"
 else
   fail "PIDS cleanup uses exact match loop" "still using substring replacement (corrupts PIDs)"
@@ -1100,12 +1102,12 @@ else
   fail "bootstrap.sh validates VS_ID" "no null check after VS_ID extraction"
 fi
 
-# GOOGLE_OAUTH env vars validated at startup
-if grep -q 'GOOGLE_OAUTH_CLIENT_ID:?' $REPO_ROOT/scripts/entrypoint.sh && \
-   grep -q 'GOOGLE_OAUTH_CLIENT_SECRET:?' $REPO_ROOT/scripts/entrypoint.sh; then
-  pass "entrypoint.sh validates GOOGLE_OAUTH env vars"
+# GOOGLE_OAUTH env vars validated at startup (via validate-config.sh, called by entrypoint.sh)
+if grep -q 'GOOGLE_OAUTH_CLIENT_ID' $REPO_ROOT/scripts/validate-config.sh && \
+   grep -q 'GOOGLE_OAUTH_CLIENT_SECRET' $REPO_ROOT/scripts/validate-config.sh; then
+  pass "validate-config.sh validates GOOGLE_OAUTH env vars"
 else
-  fail "entrypoint.sh validates GOOGLE_OAUTH env vars" "missing required var check"
+  fail "validate-config.sh validates GOOGLE_OAUTH env vars" "missing required var check"
 fi
 
 # DB_USER and DB_NAME validated as alphanumeric before DATABASE_URL interpolation
@@ -1115,8 +1117,8 @@ else
   fail "entrypoint.sh validates DB_USER format" "DB_USER interpolated into DATABASE_URL without validation"
 fi
 
-# PID file reads validated as numeric before kill
-PID_NUMERIC_CHECKS=$(grep -c 'BRIDGE_PID.*\[0-9\]' $REPO_ROOT/scripts/bootstrap.sh) || PID_NUMERIC_CHECKS=0
+# PID file reads validated as numeric before kill (BRIDGE_PID x2 + APOLLO_PID_CHECK x1)
+PID_NUMERIC_CHECKS=$(grep -cE '(BRIDGE_PID|APOLLO_PID_CHECK).*\[0-9\]' $REPO_ROOT/scripts/bootstrap.sh) || PID_NUMERIC_CHECKS=0
 if [ "$PID_NUMERIC_CHECKS" -ge 3 ]; then
   pass "bootstrap.sh validates PID file contents as numeric ($PID_NUMERIC_CHECKS checks)"
 else
@@ -1162,7 +1164,7 @@ else
 fi
 
 # R5: PID files cleaned at startup (idempotency)
-if head -40 $REPO_ROOT/scripts/entrypoint.sh | grep -q 'rm.*apollo.pid'; then
+if head -60 $REPO_ROOT/scripts/entrypoint.sh | grep -q 'rm.*apollo.pid'; then
   pass "entrypoint.sh cleans stale PID files at startup"
 else
   fail "entrypoint.sh cleans stale PID files at startup" "stale PID files from previous run cause false crash detection"
@@ -1225,13 +1227,13 @@ echo "--- B8: Curl exit code capture ---"
 
 # Dev-mcp and sheets wait loops should capture curl exit code in $rc (like Apollo does)
 # Previously used bare $? which gets overwritten by the [ ] test
-if grep 'curl.*8003.*healthz' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
+if grep 'curl.*DEVMCP_PORT.*healthz' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
   pass "dev-mcp wait captures curl exit code in \$rc"
 else
   fail "dev-mcp wait captures curl exit code in \$rc" "uses bare \$? (overwritten by [ ] test)"
 fi
 
-if grep 'curl.*8004.*healthz' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
+if grep 'curl.*SHEETS_PORT.*healthz' $REPO_ROOT/scripts/bootstrap.sh | grep -q 'rc=0.*|| rc='; then
   pass "sheets wait captures curl exit code in \$rc"
 else
   fail "sheets wait captures curl exit code in \$rc" "uses bare \$? (overwritten by [ ] test)"

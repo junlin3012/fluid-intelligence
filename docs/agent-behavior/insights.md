@@ -172,3 +172,14 @@
 - **Context**: User wanted Google Workspace MCP (90 tools, 1.8K stars) for the gateway. Analysis showed it requires browser OAuth (not headless-friendly) and adds 90 tools to context. Recommended `xing5/mcp-google-sheets` (17 tools, service account auth) for the gateway and `taylorwilsdon/google_workspace_mcp` for local Claude Code use.
 - **Insight**: Not every MCP server belongs in a gateway. Headless deployments need service account or env-var-based auth, lightweight tool counts, and stdio transport. Browser-based OAuth tools work great locally but break in containers.
 - **Pattern**: For each MCP backend, evaluate: (a) can it auth headlessly? (b) how many tools does it expose? (c) does it support stdio transport? If any answer is "no" or "too many," recommend it as a local IDE tool instead of a gateway backend.
+
+## 2026-03-18: Mirror Polish Codebase Review — 20 Fixes Across 3 Domains
+
+- **Context**: Full Mirror Polish Protocol (3 domains × 6 clean batches each) on the Fluid Intelligence codebase. 250+ review dimensions, 20 genuine fixes, 18 consecutive clean batches to exit.
+- **Insight**: The fix curve (6→4→0→2→1→0→...→0) shows classic convergence. Key categories of bugs found:
+  1. **Security**: Missing SHA256 hash on auth-proxy binary, bare system python3 in container
+  2. **Correctness**: SSE probe accepting rc=0 as "ready" (wrong — means connection closed), OTEL silently dropping traces
+  3. **Configuration**: MIN_TOOL_COUNT=70 was 3x inflated, JWT expiry too tight for worst case, dev-mcp tool count estimate wildly wrong
+  4. **Defense-in-depth**: PIDS array rebuild race on SIGTERM, decrypt_token with no input validation, flock exec with no error check
+  5. **Consistency**: curl -L missing on half the API calls, PLATFORM_ADMIN_EMAIL phantom identity
+- **Pattern**: Code-only verification catches ~95% of issues without deploying. The remaining 5% (identity E2E, runtime behavior) requires live validation. Parallel review agents + systematic debugging triage (verify before fixing) prevents false positive fixes. The accumulating exclusion list forces increasingly creative review angles — late batches probe shell arithmetic overflow, process group signal propagation, and HTTP header injection via CRLF.

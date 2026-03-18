@@ -10,14 +10,14 @@ parse_http_code() {
   [[ "$code" =~ ^[0-9]+$ ]] && echo "$code" || echo "0"
 }
 
-# Generate admin JWT for registration (15 min expiry to cover slow starts + RBAC setup:
-# worst case: Apollo 60s + dev-mcp 120s + sheets 60s + convergence 60s + RBAC 30s = ~6 min
-# plus registration retries if backends are slow to respond)
+# Generate admin JWT for registration (30 min expiry to cover slow starts + RBAC setup:
+# worst case: wait loops 240s + registration retries 300s + convergence 60s + RBAC 70s = ~11 min
+# 30 min gives generous margin for curl timeouts and slow backends)
 # Pass secrets via env vars to avoid shell injection (quotes in values would break inline Python)
 PRIMARY_ERR=""
 TOKEN=$(ADMIN_EMAIL="$PLATFORM_ADMIN_EMAIL" SECRET_KEY="$JWT_SECRET_KEY" /app/.venv/bin/python -c "
 import os, sys
-sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '15', '--secret', os.environ['SECRET_KEY']]
+sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '30', '--secret', os.environ['SECRET_KEY']]
 from mcpgateway.utils.create_jwt_token import main
 main()
 " 2>/tmp/jwt-primary-err-$$.log) || {
@@ -25,7 +25,7 @@ main()
   # Fallback: try the module directly (use env var to avoid secret in /proc/cmdline)
   TOKEN=$(ADMIN_EMAIL="$PLATFORM_ADMIN_EMAIL" SECRET_KEY="$JWT_SECRET_KEY" python3 -c "
 import os, sys
-sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '15', '--secret', os.environ['SECRET_KEY']]
+sys.argv = ['create_jwt_token', '--username', os.environ['ADMIN_EMAIL'], '--exp', '30', '--secret', os.environ['SECRET_KEY']]
 from mcpgateway.utils.create_jwt_token import main
 main()
 " 2>/tmp/jwt-fallback-err-$$.log)
@@ -54,8 +54,11 @@ BOOTSTRAP_LOCK="/tmp/bootstrap.lock"
 if ! command -v flock >/dev/null 2>&1; then
   echo "[bootstrap] WARNING: flock not available — skipping advisory lock (install util-linux)"
 else
-  exec 9>"$BOOTSTRAP_LOCK"
-  if ! flock -n 9; then
+  exec 9>"$BOOTSTRAP_LOCK" 2>/dev/null || {
+    echo "[bootstrap] WARNING: Could not open lock file (read-only /tmp?) — skipping lock"
+    exec 9>/dev/null  # ensure fd 9 is valid for script lifetime
+  }
+  if ! flock -n 9 2>/dev/null; then
     echo "[bootstrap] Another instance is running bootstrap — skipping (flock held)"
     exit 0
   fi
@@ -75,7 +78,9 @@ DEVMCP_PORT="${DEVMCP_PORT:-8003}"
 SHEETS_PORT="${SHEETS_PORT:-8004}"
 
 # Primary user for team/role assignment (set via env var, never hardcoded)
+# Strip whitespace from derived email (handles "user1@x.com, user2@y.com" format)
 PRIMARY_USER_EMAIL="${PRIMARY_USER_EMAIL:-${GOOGLE_ALLOWED_USERS%%,*}}"
+PRIMARY_USER_EMAIL="${PRIMARY_USER_EMAIL// /}"
 
 # Virtual server name
 VIRTUAL_SERVER_NAME="${VIRTUAL_SERVER_NAME:-fluid-intelligence}"
@@ -97,14 +102,14 @@ register_gateway() {
   # Delete any existing registrations (stale URL/transport from previous deploy)
   # Use head -1 to handle multiple entries with the same name (delete each individually)
   local existing_ids
-  existing_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
+  existing_ids=$(curl -sf -L --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     "$CF/gateways" 2>/dev/null | \
     jq -r --arg n "$name" '.[] | select(.name==$n) | .id' 2>/dev/null) || true
   if [ -n "$existing_ids" ]; then
     echo "$existing_ids" | while read -r eid; do
       [ -z "$eid" ] || [ "$eid" = "null" ] && continue
       echo "[bootstrap] Deleting stale $name (id=$eid)"
-      del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
+      del_code=$(curl -s -L -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
         -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/gateways/$eid" 2>/dev/null) || del_code=0
       if [ "$del_code" -ne 200 ] && [ "$del_code" -ne 204 ] && [ "$del_code" -ne 404 ]; then
         echo "[bootstrap] WARNING: DELETE gateway $eid returned HTTP $del_code"
@@ -117,7 +122,7 @@ register_gateway() {
     payload=$(jq -n --arg n "$name" --arg u "$url" --arg t "$transport" \
       '{name: $n, url: $u, transport: $t}')
     local curl_err="/tmp/bootstrap-curl-err-$$.log"
-    response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 60 -X POST \
+    response=$(curl -s -L -w "\n%{http_code}" --connect-timeout 2 --max-time 60 -X POST \
       -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
       -H "Content-Type: application/json" \
       -d "$payload" \
@@ -233,7 +238,7 @@ MIN_TOOL_COUNT=${MIN_TOOL_COUNT:-70}
 prev_count=-1
 stable=0
 for i in $(seq 1 30); do
-  TOOL_COUNT=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
+  TOOL_COUNT=$(curl -sf -L --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | jq 'length' 2>/dev/null) || TOOL_COUNT=0
   [[ "$TOOL_COUNT" =~ ^[0-9]+$ ]] || TOOL_COUNT=0
   if [ "$TOOL_COUNT" -eq "$prev_count" ] && [ "$TOOL_COUNT" -gt 0 ]; then
     stable=$((stable + 1))
@@ -252,7 +257,7 @@ fi
 if [ "$TOOL_COUNT" -lt "$MIN_TOOL_COUNT" ]; then
   echo "[bootstrap] WARNING: Only $TOOL_COUNT tools discovered (expected >= $MIN_TOOL_COUNT)"
   echo "[bootstrap]   This suggests a backend failed to register or tool discovery is incomplete"
-  echo "[bootstrap]   Expected: Apollo ~7 + dev-mcp ~50+ + sheets ~17 = ~74+"
+  echo "[bootstrap]   Expected: Apollo ~7 + dev-mcp ~3-7 + sheets ~17 = ~27-31"
   # Don't exit — partial service is better than no service. But log loudly.
 fi
 
@@ -262,14 +267,14 @@ fi
 echo "[bootstrap] Creating virtual server..."
 
 # Delete existing virtual servers (stale from previous deploy — could be multiple)
-existing_vs_ids=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
+existing_vs_ids=$(curl -sf -L --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
   "$CF/servers" 2>/dev/null | \
   jq -r '.[] | select(.name=="'"$VIRTUAL_SERVER_NAME"'") | .id' 2>/dev/null) || true
 if [ -n "$existing_vs_ids" ]; then
   echo "$existing_vs_ids" | while read -r vs_id; do
     [ -z "$vs_id" ] || [ "$vs_id" = "null" ] && continue
     echo "[bootstrap] Deleting stale virtual server (id=$vs_id)"
-    vs_del_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
+    vs_del_code=$(curl -s -L -o /dev/null -w "%{http_code}" --connect-timeout 2 --max-time 10 -X DELETE \
       -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/servers/$vs_id" 2>/dev/null) || vs_del_code=0
     if [ "$vs_del_code" -ne 200 ] && [ "$vs_del_code" -ne 204 ] && [ "$vs_del_code" -ne 404 ]; then
       echo "[bootstrap] WARNING: DELETE virtual server $vs_id returned HTTP $vs_del_code"
@@ -278,7 +283,7 @@ if [ -n "$existing_vs_ids" ]; then
 fi
 
 # Get all tool IDs from the catalog
-TOOL_IDS=$(curl -sf --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | \
+TOOL_IDS=$(curl -sf -L --connect-timeout 2 --max-time 10 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | \
   jq -r 'if type == "array" then [.[].id | select(. != null)] | @json else "[]" end' 2>/dev/null) || TOOL_IDS="[]"
 if [ "$TOOL_IDS" = "[]" ]; then
   echo "[bootstrap] WARNING: No tool IDs found — virtual server will expose zero tools"
@@ -289,7 +294,7 @@ fi
 vs_payload=$(jq -n --argjson tools "$TOOL_IDS" --arg name "$VIRTUAL_SERVER_NAME" \
   '{server: {name: $name, description: "All registered backend tools", associated_tools: $tools}}')
 vs_curl_err="/tmp/bootstrap-vs-curl-err-$$.log"
-vs_response=$(curl -s -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
+vs_response=$(curl -s -L -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
   -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
   -H "Content-Type: application/json" \
   -d "$vs_payload" \
@@ -319,11 +324,11 @@ fi
 
 # --- Debug dump ---
 echo "[bootstrap] --- Debug: /gateways ---"
-curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/gateways" 2>/dev/null | jq '[.[] | {name, id, url}]' 2>/dev/null || echo "  /gateways failed"
+curl -sf -L --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/gateways" 2>/dev/null | jq '[.[] | {name, id, url}]' 2>/dev/null || echo "  /gateways failed"
 echo "[bootstrap] --- Debug: /servers ---"
-curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/servers" 2>/dev/null | jq '[.[] | {name, id}]' 2>/dev/null || echo "  /servers failed"
+curl -sf -L --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/servers" 2>/dev/null | jq '[.[] | {name, id}]' 2>/dev/null || echo "  /servers failed"
 echo "[bootstrap] --- Debug: tool names ---"
-curl -sf --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | jq '[.[].name]' 2>/dev/null | head -30 || echo "  /tools failed"
+curl -sf -L --connect-timeout 2 --max-time 5 -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" "$CF/tools" 2>/dev/null | jq '[.[].name]' 2>/dev/null | head -30 || echo "  /tools failed"
 
 # ============================================================
 # RBAC: Team + User + Role Setup
@@ -393,6 +398,11 @@ add_user_to_team() {
   fi
 }
 
+# --- URL-encode a value for safe use in URL paths ---
+urlencode() {
+  /app/.venv/bin/python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
+}
+
 # --- Look up role ID by name ---
 get_role_id() {
   local role_name="$1"
@@ -422,11 +432,13 @@ assign_role() {
   payload=$(jq -n --arg r "$role_id" --arg s "$scope" --arg si "$scope_id" \
     '{role_id: $r, scope: $s, scope_id: (if $si == "" then null else $si end)}')
 
+  local email_encoded
+  email_encoded=$(urlencode "$email")
   response=$(curl -s -L -w "\n%{http_code}" --connect-timeout 2 --max-time 10 -X POST \
     -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
     -H "Content-Type: application/json" \
     -d "$payload" \
-    "$CF/rbac/users/$email/roles/" 2>/dev/null) || true
+    "$CF/rbac/users/$email_encoded/roles/" 2>/dev/null) || true
 
   http_code=$(parse_http_code "$response")
   body=$(echo "$response" | sed '$d')
@@ -452,9 +464,10 @@ VIEWER_TEAM_ID=$(create_team "viewer" "Read-only Shopify access")
 # Bootstrap only pre-assigns team membership IF the user already exists.
 
 if [ -n "$PRIMARY_USER_EMAIL" ]; then
+  primary_email_encoded=$(urlencode "$PRIMARY_USER_EMAIL")
   user_exists=$(curl -sf -L --connect-timeout 2 --max-time 10 \
     -H "Authorization: Bearer $TOKEN" -H "$PROXY_AUTH_HEADER" \
-    "$CF/rbac/users/$PRIMARY_USER_EMAIL/" 2>/dev/null | jq -r '.email // empty' 2>/dev/null) || true
+    "$CF/rbac/users/$primary_email_encoded/" 2>/dev/null | jq -r '.email // empty' 2>/dev/null) || true
 
   if [ "$user_exists" = "$PRIMARY_USER_EMAIL" ]; then
     echo "[bootstrap] User $PRIMARY_USER_EMAIL exists — assigning team + role"
