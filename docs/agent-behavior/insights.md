@@ -183,3 +183,15 @@
   4. **Defense-in-depth**: PIDS array rebuild race on SIGTERM, decrypt_token with no input validation, flock exec with no error check
   5. **Consistency**: curl -L missing on half the API calls, PLATFORM_ADMIN_EMAIL phantom identity
 - **Pattern**: Code-only verification catches ~95% of issues without deploying. The remaining 5% (identity E2E, runtime behavior) requires live validation. Parallel review agents + systematic debugging triage (verify before fixing) prevents false positive fixes. The accumulating exclusion list forces increasingly creative review angles — late batches probe shell arithmetic overflow, process group signal propagation, and HTTP header injection via CRLF.
+
+## 2026-03-19: OWASP API Security Top 10 Audit — Production Gateway
+
+- **Context**: Ran comprehensive API security testing against the live Fluid Intelligence gateway following OWASP API Security Top 10. Tested endpoint discovery, authentication attacks, authorization (BOLA/BFLA), input validation, data exposure, and rate limiting.
+- **Insight**: The gateway has strong authentication and authorization foundations but has specific gaps in rate limiting, identity propagation, and information leakage:
+  1. **Strong**: RS256 JWT with kid rotation, alg:none rejection, tampered token rejection, foreign issuer rejection, all admin endpoints return "Access denied" for non-admin tokens
+  2. **Critical gap**: Password-auth JWTs have NO `sub` claim — auth-proxy cannot set X-Authenticated-User header, meaning password users are anonymous to ContextForge
+  3. **Missing**: No rate limiting at any layer — token endpoint, login, DCR, and MCP all accept unlimited rapid requests
+  4. **Info leak**: Pydantic validation errors expose framework name, version (2.12), and external error URLs
+  5. **Weak**: PKCE `plain` method supported (defeats PKCE purpose), 24h token lifetime, no CSRF on login form, session cookie missing `Secure` flag, CSP has `unsafe-inline` + `unsafe-eval`
+  6. **Good**: 1.5MB payload accepted and processed (no payload size limit but also no crash), oversized payload test shows resilience. All fuzzed endpoints return 401. No internal URLs in OAuth metadata. SSRF via tool arguments failed (Apollo ignores endpoint parameter). Path traversal normalized correctly.
+- **Pattern**: For MCP gateways, the OAuth authorization server is the highest-value target. Rate limiting on /.idp/token and /.auth/login is critical — without it, an attacker can brute-force passwords or exhaust auth resources. The identity gap in password auth is a design issue, not a bug — fosite (the OAuth library) treats password users differently from Google OAuth users regarding the `sub` claim.

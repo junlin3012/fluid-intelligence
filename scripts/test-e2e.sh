@@ -474,6 +474,65 @@ else
 fi
 
 # =============================================
+# 10. SECURITY HARDENING TESTS
+# =============================================
+echo "--- 10. Security Hardening ---"
+
+# 10a. Rate limiting on login (5 req/min threshold)
+echo "  Testing rate limiting on /.auth/login..."
+RL_PASS=true
+COOKIE_RL=$(mktemp)
+# Initiate a fresh auth session for rate limit testing
+curl -sL -c "$COOKIE_RL" -o /dev/null \
+  "$BASE/.idp/auth?response_type=code&client_id=$CLIENT_ID&redirect_uri=$REDIRECT_URI&state=rl-test&code_challenge=$(echo -n 'rl-test-verifier-padding-padding-padding-padding' | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')&code_challenge_method=S256" 2>/dev/null
+for i in $(seq 1 8); do
+  RL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    -b "$COOKIE_RL" -c "$COOKIE_RL" \
+    -d "password=wrong" "$BASE/.auth/login" 2>/dev/null)
+  if [ "$i" -gt 5 ] && [ "$RL_CODE" != "429" ]; then
+    RL_PASS=false
+  fi
+done
+rm -f "$COOKIE_RL"
+if [ "$RL_PASS" = true ]; then
+  result "PASS" "Rate limiting on login (429 after 5 attempts)"
+else
+  result "WARN" "Rate limiting on login" "Attempt 6+ still accepted (may need deployment with v2.5.5-security)"
+fi
+
+# 10b. Token lifetime check
+TOKEN_EXP_DELTA=$(echo "$ACCESS_TOKEN" | cut -d. -f2 | (base64 -d 2>/dev/null || base64 -D 2>/dev/null) | jq 'if .exp and .iat then (.exp - .iat) else 999999 end' 2>/dev/null)
+if [ -n "$TOKEN_EXP_DELTA" ] && [ "$TOKEN_EXP_DELTA" -le 3601 ] 2>/dev/null; then
+  result "PASS" "Token lifetime <= 1 hour (${TOKEN_EXP_DELTA}s)"
+else
+  result "WARN" "Token lifetime" "exp-iat=${TOKEN_EXP_DELTA}s (expected <= 3600)"
+fi
+
+# 10c. JWT audience claim
+TOKEN_AUD=$(echo "$ACCESS_TOKEN" | cut -d. -f2 | (base64 -d 2>/dev/null || base64 -D 2>/dev/null) | jq -r 'if .aud then (.aud | if type == "array" then .[0] // "empty" else . end) else "missing" end' 2>/dev/null)
+if [ -n "$TOKEN_AUD" ] && [ "$TOKEN_AUD" != "empty" ] && [ "$TOKEN_AUD" != "missing" ]; then
+  result "PASS" "JWT audience set ($TOKEN_AUD)"
+else
+  result "WARN" "JWT audience" "aud=$TOKEN_AUD (expected non-empty)"
+fi
+
+# 10d. PKCE plain method not advertised
+PKCE_METHODS=$(curl -s "$BASE/.well-known/oauth-authorization-server" 2>/dev/null | jq -r '.code_challenge_methods_supported // [] | join(",")' 2>/dev/null)
+if echo "$PKCE_METHODS" | grep -q "plain"; then
+  result "WARN" "PKCE plain method" "Still advertised: $PKCE_METHODS"
+else
+  result "PASS" "PKCE plain disabled (methods: $PKCE_METHODS)"
+fi
+
+# 10e. Pydantic error sanitization
+PYDANTIC_TEST=$(mcp_post "$MCP_PATH" '{"jsonrpc":"2.0","id":99,"method":"tools/call","params":"not-an-object"}')
+if echo "$PYDANTIC_TEST" | grep -qi "pydantic\|errors.pydantic.dev"; then
+  result "WARN" "Pydantic leak" "Framework name or URL in error response"
+else
+  result "PASS" "Error responses sanitized (no framework leak)"
+fi
+
+# =============================================
 # SUMMARY
 # =============================================
 echo ""
