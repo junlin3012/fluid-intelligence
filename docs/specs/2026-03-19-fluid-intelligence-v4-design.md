@@ -349,7 +349,8 @@ CMD ["python", "-m", "mcpgateway.translate", "--stdio", "node /app/devmcp-module
 - Point-in-time recovery: enabled
 - RPO: 24 hours (lean), 1 hour (production). RTO: 30 minutes (lean), 10 minutes (production).
 - Keycloak realm JSON export as secondary backup (version-controlled in repo, importable via `--import-realm`)
-- Recovery procedure: restore Cloud SQL from backup → Keycloak auto-imports realm JSON on startup → bootstrap re-registers backends
+- **Realm import behavior:** Keycloak's `--import-realm` **skips** if the realm already exists (no merge, no overwrite). This means: (a) normal restarts with existing DB = import silently skipped (correct), (b) realm config changes in JSON are NOT picked up on restart — use `kcadm.sh` or Admin API for runtime realm updates. Realm JSON import is for initial setup and disaster recovery (empty DB), not for config propagation.
+- Recovery procedure: restore Cloud SQL from backup → Keycloak auto-imports realm JSON on startup (only if realm doesn't exist in restored DB) → bootstrap re-registers backends
 - Human error mitigation: `keycloak_user` and `contextforge_user` cannot DROP DATABASE or DROP TABLE on critical tables
 
 **Connection pool budget (db-f1-micro max 25 connections):**
@@ -673,7 +674,7 @@ Every secret must have a defined rotation procedure. Wrong ordering causes outag
 **Graceful shutdown:**
 - `terminationGracePeriodSeconds: 30` (Shopify GraphQL queries can take 5-10s)
 - On SIGTERM: ContextForge stops accepting new requests, drains in-flight, then exits
-- Sidecars must stay alive longer than ContextForge to complete in-flight tool calls
+- Sidecars must stay alive longer than ContextForge to complete in-flight tool calls. **Enforcement:** Cloud Run sends SIGTERM to all containers simultaneously — there is no per-container stagger. Sidecars should trap SIGTERM and delay exit (e.g., `sleep 5` before shutdown) to outlive ContextForge's drain period. ContextForge drains in-flight requests (typically <5s for Shopify queries), then exits. Sidecars wait an additional 5s before exiting, ensuring in-flight tool calls complete. Total: well within the 30s grace period.
 - MCP SSE streams (dev-mcp, sheets) close gracefully on SIGTERM with final event
 
 **Per-container resource limits:**
