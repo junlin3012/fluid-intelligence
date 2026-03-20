@@ -137,6 +137,7 @@ AI Client
 - Identity Provider: Google OAuth
 - Custom JWT mapper: inject `tenant_id` claim from user attributes
 - Token lifetime: 1 hour access, 24 hours refresh (with rotation)
+- **SSO Session timeouts (MUST configure — Keycloak defaults conflict with token lifetimes):** `SSO Session Idle: 1 hour` (match access token lifetime), `SSO Session Max: 24 hours` (match refresh token lifetime). Keycloak defaults are 30-minute idle / 10-hour max — if left unconfigured, the 30-minute idle timeout silently invalidates refresh tokens after 30 minutes of inactivity, despite the 24-hour refresh token lifetime. Whichever expires first wins.
 - JWT algorithm: RS256 only (pinned, reject all others)
 - JWT claims: `sub`, `email`, `roles`, `tenant_id`, `aud` (audience = fixed resource-server identifier), `azp`
 - **Audience mapper (REQUIRED for DCR model):** With DCR, each client gets a unique `client_id`. Keycloak sets `aud` to the requesting client's `client_id` by default. ContextForge cannot validate `aud` against a single value without a fixed audience. **Fix:** Configure a Keycloak "Audience" protocol mapper at the realm level that adds a fixed audience value (e.g., `fluid-gateway`) to ALL tokens. ContextForge validates `aud` contains `fluid-gateway`. Without this, ContextForge either skips `aud` validation (accepting any realm JWT) or breaks with DCR.
@@ -229,7 +230,7 @@ AI Client
 | **Rate limiting** | Per-user, per-tenant, per-tool (in-memory, distributed in v1.2.0) |
 | **Circuit breakers** | Per-tool, 3-state, configurable thresholds |
 | **Observability** | OpenTelemetry tracing (4 exporters), Prometheus metrics (12+), structured logging, correlation IDs |
-| **Caching** | Tool result caching (SHA256 key, configurable TTL) |
+| **Caching** | Tool result caching (SHA256 key, configurable TTL). **SECURITY:** Cache keys MUST include `{tenant_id, user_role}` to prevent cross-tenant and cross-role data leakage. Without this, tenant A could see tenant B's cached Shopify data from the same tool+args, or a viewer could see an admin's cached results. Verify ContextForge cache key composition during implementation; if keys are only tool+args, disable caching or restrict to tenant-agnostic tools only. |
 | **Security** | SSRF protection, input validation, 1MB payload limit, PII filter plugin, secrets detection |
 | **Audit** | Every action logged with user, IP, correlation ID, 90-day retention |
 | **REST passthrough** | Register REST API endpoints directly as MCP tools |
