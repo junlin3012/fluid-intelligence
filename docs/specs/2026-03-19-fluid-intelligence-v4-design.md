@@ -246,7 +246,7 @@ AI Client
 
 **Auth integration with Keycloak (CRITICAL — v3 trust model does NOT carry forward):**
 
-v3 used `TRUST_PROXY_AUTH_DANGEROUSLY=true` + `AUTH_REQUIRED=false` because everything was on localhost in one container. **This is unsafe in v4** — sidecars share localhost and can spoof identity headers. All three security audits flagged this as CRITICAL.
+v3 used `TRUST_PROXY_AUTH_DANGEROUSLY=true` + `MCP_CLIENT_AUTH_ENABLED=false` (auth-proxy handled JWT, ContextForge trusted proxy headers without validating signatures) because everything was on localhost in one container. **This is unsafe in v4** — sidecars share localhost and can spoof identity headers. All three security audits flagged this as CRITICAL.
 
 v4 approach: **ContextForge validates Keycloak JWTs directly.**
 - `AUTH_REQUIRED=true` — ContextForge requires a valid JWT on every request
@@ -547,7 +547,7 @@ All provided natively. Configuration only.
 ### Keycloak cold start + auth availability
 
 - If Keycloak is down (cold start, crash), ContextForge MUST reject all requests with **503 Service Unavailable** (not 401 — 503 signals "retry later" to clients, 401 means "your credentials are wrong")
-- **ContextForge readiness probe (REQUIRED):** The Cloud Run startup probe for ContextForge must NOT just check `/health`. It must verify JWKS is fetched and non-empty before the service accepts traffic. Implementation options: (a) custom `/ready` endpoint that returns 200 only after JWKS cache is populated, (b) ContextForge startup hook that blocks the HTTP server until JWKS is fetched. Without this, there is a window where ContextForge accepts traffic but cannot validate JWTs.
+- **ContextForge readiness probe (REQUIRED):** The Cloud Run startup probe for ContextForge must NOT just check `/health`. It must verify JWKS is fetched and non-empty before the service accepts traffic. Implementation options: (a) custom `/ready` endpoint that returns 200 only after JWKS cache is populated, (b) ContextForge startup hook that blocks the HTTP server until JWKS is fetched. Without this, there is a window where ContextForge accepts traffic but cannot validate JWTs. **Probe timing for lean tier:** Keycloak takes 15-30s to cold-start. Set `failureThreshold: 20`, `periodSeconds: 3` (60s total window) to avoid Cloud Run restarting the gateway before Keycloak is ready.
 - For production tier: Keycloak `min-instances=1` (always warm)
 - **Startup ordering for lean tier (both scale-to-zero):** Client request hits gateway → gateway tries JWKS → fails → returns 503 → Cloud Run wakes Keycloak → retry succeeds. No circular dependency — gateway can start without Keycloak but won't serve authenticated requests until JWKS is reachable.
 - Rate limiting on Keycloak auth endpoints: configure Keycloak's brute force detection (account lockout after 5 failed attempts, unlock after 15 minutes)
@@ -790,12 +790,19 @@ Same images as production, different orchestration.
 - npx runtime fetch → build-time install
 
 ### What's new
-- Keycloak Cloud Run service
-- Sidecar container definitions
-- Tenant context injection layer
-- CVE scanning in CI/CD
+- Keycloak Cloud Run service (dedicated auth, persistent sessions)
+- Sidecar container definitions (Apollo, dev-mcp, Google Sheets via mcpgateway.translate)
+- Tenant context injection layer (the one custom component)
+- Keycloak audience mapper for DCR-compatible `aud` validation
+- DCR Client Registration Policy (force public clients, restrict grant/response types, scope limits)
+- OAuth metadata resolution (RFC 8414 vs OIDC discovery path)
+- HTTP security headers (HSTS, Cache-Control, X-Frame-Options)
+- Secret rotation runbook (per-secret procedures)
+- CVE scanning + image signing (cosign + SLSA + Binary Authorization) in CI/CD
 - SBOM generation
 - Dependency lock files
+- Cloud Armor WAF for DCR rate limiting
+- Keycloak feature hardening (token-exchange-standard, device-flow, CIBA disabled)
 
 ## 12. Bootstrap & Backend Registration
 
@@ -910,7 +917,6 @@ v4.0 is complete when ALL of these pass:
 - [ ] Implement GraphQL query cost estimation plugin (medium-term)
 - [ ] Configure error sanitization to prevent Pydantic framework leakage
 - [ ] Use `strict=False` for JSON parsing of ContextForge responses (unescaped newlines in tool descriptions)
-- [ ] ~~Pin supergateway version~~ OBSOLETE — supergateway replaced by mcpgateway.translate (Batch 8). Remove this item.
 - [ ] Pin @shopify/dev-mcp version in package-lock.json
 - [ ] Pin xing5/mcp-google-sheets version in requirements lock file
 - [ ] Pin Apollo to specific commit hash (not just tag v1.9.0)
@@ -921,7 +927,6 @@ v4.0 is complete when ALL of these pass:
 - [ ] Specify Google Sheets sidecar Dockerfile (port 8004, Python base, non-root, tini)
 - [ ] Configure Keycloak DCR client policy: Web Origins = empty (no CORS by default for public clients)
 - [ ] Verify license for xing5/mcp-google-sheets (must be permissive: MIT/Apache/BSD)
-- [ ] ~~Verify supergateway provenance~~ OBSOLETE — supergateway replaced by mcpgateway.translate (Batch 8). Remove this item.
 - [ ] Keycloak realm JSON export: use `--no-credentials` flag, replace secrets with placeholders, run gitleaks on realm JSON before committing
 - [ ] Define `.cve-allowlist` governance: required fields (CVE ID, justification, approver, date, review-by), CI warns when fix becomes available
 - [ ] Implement `HTTP_AUTH_RESOLVE_USER` plugin hook to derive ContextForge roles from JWT claims per-request (not from DB)
