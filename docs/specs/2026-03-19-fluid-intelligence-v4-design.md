@@ -42,8 +42,8 @@ Cloud Run Service 1: Keycloak
 Cloud Run Service 2: Fluid Intelligence Gateway
   ├── ContextForge (main container)
   ├── Apollo MCP Server (sidecar)
-  ├── dev-mcp via supergateway (sidecar)
-  └── Google Sheets via supergateway (sidecar)
+  ├── dev-mcp via mcpgateway.translate (sidecar)
+  └── Google Sheets via mcpgateway.translate (sidecar)
   → PostgreSQL (same Cloud SQL instance, different database)
 ```
 
@@ -264,6 +264,7 @@ This avoids the v3 Double-Auth Problem because v4 has ONE JWT issuer (Keycloak) 
 - Unknown `kid` refresh rate limit: max 1 JWKS refresh per 60 seconds to prevent cache-busting DoS. `kid` values used only for key matching within the JWKS response — never as input to database queries or filesystem paths.
 - Token reuse after logout: access tokens remain valid up to 1 hour after logout (accepted risk — JWT validation is stateless). Mitigations: short lifetime (1 hour), HTTPS-only transport, tokens never logged by ContextForge.
 - PII in JWT payload: `email` claim is PII. JWTs are signed but not encrypted (readable if intercepted). Acceptable because: HTTPS-only, short lifetime, auto-masked in structured logs. JWE not used — adds complexity without meaningful gain in this architecture.
+- **Claim value validation (post-extraction):** JWT signature proves authenticity, but claim VALUES must also be validated: `tenant_id` must be non-empty alphanumeric (max 64 chars) — reject if missing/malformed (prevents credential mismatch in tenant context injection); `roles` must contain only known values (`admin`, `developer`, `viewer`) — unknown values treated as no-role (deny all); `email` must pass basic RFC 5322 format check. Malformed claims from Keycloak admin misconfiguration should fail closed, not silently proceed.
 - Issuer (`iss`): must match Keycloak realm URL exactly
 - Audience (`aud`): must contain the fixed resource-server audience value (e.g., `fluid-gateway`) configured via Keycloak realm-level audience mapper (see Section 4.1 audience mapper)
 - JWKS caching: 10-minute TTL, refresh on unknown `kid`
@@ -545,8 +546,8 @@ All provided natively. Configuration only.
 
 ### Keycloak cold start + auth availability
 
-- If Keycloak is down (cold start, crash), ContextForge MUST reject all requests (fail closed)
-- ContextForge startup gate: verify Keycloak JWKS endpoint is reachable before accepting traffic
+- If Keycloak is down (cold start, crash), ContextForge MUST reject all requests with **503 Service Unavailable** (not 401 — 503 signals "retry later" to clients, 401 means "your credentials are wrong")
+- **ContextForge readiness probe (REQUIRED):** The Cloud Run startup probe for ContextForge must NOT just check `/health`. It must verify JWKS is fetched and non-empty before the service accepts traffic. Implementation options: (a) custom `/ready` endpoint that returns 200 only after JWKS cache is populated, (b) ContextForge startup hook that blocks the HTTP server until JWKS is fetched. Without this, there is a window where ContextForge accepts traffic but cannot validate JWTs.
 - For production tier: Keycloak `min-instances=1` (always warm)
 - **Startup ordering for lean tier (both scale-to-zero):** Client request hits gateway → gateway tries JWKS → fails → returns 503 → Cloud Run wakes Keycloak → retry succeeds. No circular dependency — gateway can start without Keycloak but won't serve authenticated requests until JWKS is reachable.
 - Rate limiting on Keycloak auth endpoints: configure Keycloak's brute force detection (account lockout after 5 failed attempts, unlock after 15 minutes)
@@ -572,6 +573,12 @@ All provided natively. Configuration only.
 - ContextForge Admin API must NOT expose audit deletion endpoints
 - Export audit records to Cloud Logging as tamper-evident secondary store (separate IAM from gateway SA)
 - Acceptance test: verify `DELETE FROM audit_log` fails as `contextforge_user`
+
+### Tool response validation
+
+- **Response size limit:** Configure ContextForge to enforce a per-tool response size limit (default 5MB). A single `products(first:250){variants(first:250){...allFields}}` query can return multi-megabyte responses. Without limits, a single tool call can exhaust gateway memory.
+- **Response structure:** ContextForge should validate that sidecar responses conform to MCP JSON-RPC format before forwarding. Malformed responses (HTML error pages, binary data) should be caught and returned as tool errors.
+- **Prompt injection via tool responses:** Tool responses containing user-generated content (Shopify product descriptions, customer notes) may contain adversarial instructions. This is an industry-wide unsolved problem. Accepted risk — defense is at the AI client layer, not the gateway layer. Document this as a known limitation.
 
 ### Tool description security
 
@@ -611,6 +618,21 @@ The gateway processes tenant PII (Shopify customer names, emails, addresses, ord
 4. Preserve: lock Cloud Logging retention, export to immutable storage for forensics
 5. Notify: GDPR 72-hour notification (if PII accessed), Australian NDB scheme (if serious harm likely)
 
+### Secret rotation runbook
+
+Every secret must have a defined rotation procedure. Wrong ordering causes outages (e.g., updating Secret Manager before PostgreSQL `ALTER USER` = all connections fail).
+
+| Secret | Rotation Steps (in order) | Zero-Downtime? | Old Version Cleanup |
+|--------|--------------------------|----------------|-------------------|
+| **Keycloak RS256 signing key** | Keycloak admin → rotate key → old key stays in JWKS for 1 hour (matches token lifetime) → ContextForge refreshes JWKS on unknown `kid` | Yes (key overlap) | Keycloak auto-removes after configured overlap period |
+| **PostgreSQL passwords** | (1) Create new password in Secret Manager, (2) `ALTER USER ... PASSWORD '...'` in PostgreSQL (old connections keep working), (3) Redeploy Cloud Run service (picks up new volume mount), (4) Verify connectivity, (5) Destroy old Secret Manager version | Yes (PostgreSQL doesn't kill existing connections on password change) | Destroy old SM version after deploy verified |
+| **Shopify API tokens** | (1) Generate new token in Shopify admin, (2) Create new version in Secret Manager, (3) Redeploy service, (4) Verify Shopify API connectivity | Requires restart (brief downtime). Shopify tokens are per-app, old token may be revoked on new issuance — test | Destroy old SM version |
+| **AUTH_ENCRYPTION_SECRET** | (1) Create new secret in SM, (2) Verify ContextForge supports dual-key decryption during rotation, (3) Redeploy, (4) Re-encrypt data with new key if needed | Depends on ContextForge support — verify | Old version needed until re-encryption complete |
+| **Bootstrap SA credentials** | (1) Update client secret in Keycloak (admin API or realm JSON), (2) Update secret in SM, (3) Redeploy | Only runs during deploy — no runtime impact | N/A |
+| **Keycloak admin password** | (1) Store in Secret Manager (not realm JSON), (2) Update via Keycloak admin API, (3) Update SM version, (4) Verify kcadm.sh works | Yes (existing sessions unaffected) | Destroy old SM version |
+
+**Old version cleanup policy:** Destroy Secret Manager versions > 30 days old after verifying no active revision uses them. Never destroy a version while any Cloud Run revision references it (Cloud Run can't start instances without resolving `--set-secrets`).
+
 ### Cloud Run revision hygiene
 
 - Post-deploy CI step: delete all revisions except the 2 most recent
@@ -634,7 +656,8 @@ The gateway processes tenant PII (Shopify customer names, emails, addresses, ord
 **Startup ordering (Cloud Run container dependencies):**
 - Sidecars (Apollo, dev-mcp, sheets) start first with `condition: started`
 - ContextForge depends on all three sidecars with `condition: healthy` (waits for their startup probes). **Note:** Container dependencies with health conditions are Pre-GA as of March 2026. Fallback: use ContextForge retry logic on backend registration (circuit breaker handles sidecars that aren't ready yet).
-- Bootstrap init container depends on ContextForge with `condition: healthy`
+- **Bootstrap is NOT a Cloud Run init container** (init containers run before app containers, which contradicts the dependency on ContextForge). Bootstrap is a **sidecar that runs once**: it starts after ContextForge is healthy, registers backends, then exits. Cloud Run keeps the exited container's logs but doesn't restart it.
+- **Pre-bootstrap window:** Between ContextForge readiness and bootstrap completion, the gateway is authenticated but has no tools. Requests return valid authenticated responses with an empty tool list. This is safe (no auth bypass) but users may see "no tools available" for 10-30 seconds on cold start.
 - This replaces v3's bash orchestration with Cloud Run-native dependency management
 
 **Graceful shutdown:**
