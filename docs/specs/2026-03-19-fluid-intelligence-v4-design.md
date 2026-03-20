@@ -121,7 +121,7 @@ AI Client
 **Keycloak provides natively:**
 - OAuth 2.1 with PKCE S256
 - Dynamic Client Registration (RFC 7591) — required by MCP spec
-- Authorization Server Metadata (RFC 8414) — required by MCP spec
+- Authorization Server Metadata (RFC 8414) — required by MCP spec. **Note:** Keycloak natively serves `/.well-known/openid-configuration`, NOT `/.well-known/oauth-authorization-server`. MCP spec expects the latter. Resolution required: ALB path rewrite, Keycloak SPI extension, or ContextForge proxy endpoint. This is a **blocker** — without it, no MCP client can discover the authorization server. The metadata response must include at minimum: `issuer`, `authorization_endpoint`, `token_endpoint`, `registration_endpoint`, `response_types_supported` (= `["code"]`), `grant_types_supported` (= `["authorization_code", "refresh_token"]`), `code_challenge_methods_supported` (= `["S256"]`), `token_endpoint_auth_methods_supported` (must include `"none"`), `jwks_uri`, `revocation_endpoint`
 - Google/GitHub social login
 - Username/password login
 - User management and admin console
@@ -138,16 +138,27 @@ AI Client
 - Custom JWT mapper: inject `tenant_id` claim from user attributes
 - Token lifetime: 1 hour access, 24 hours refresh (with rotation)
 - JWT algorithm: RS256 only (pinned, reject all others)
-- JWT claims: `sub`, `email`, `roles`, `tenant_id`, `aud` (audience = gateway client ID), `azp`
-- PKCE enforcement: Client Policy requiring `pkce.code.challenge.required=true`, S256 only (reject `plain`)
+- JWT claims: `sub`, `email`, `roles`, `tenant_id`, `aud` (audience = fixed resource-server identifier), `azp`
+- **Audience mapper (REQUIRED for DCR model):** With DCR, each client gets a unique `client_id`. Keycloak sets `aud` to the requesting client's `client_id` by default. ContextForge cannot validate `aud` against a single value without a fixed audience. **Fix:** Configure a Keycloak "Audience" protocol mapper at the realm level that adds a fixed audience value (e.g., `fluid-gateway`) to ALL tokens. ContextForge validates `aud` contains `fluid-gateway`. Without this, ContextForge either skips `aud` validation (accepting any realm JWT) or breaks with DCR.
+- PKCE enforcement: Client Policy requiring `pkce.code.challenge.required=true` AND `pkce.code.challenge.method=S256`. Both are needed — RFC 7636 §4.3 says if `code_challenge_method` is omitted by the client, the server MUST default to `plain`. Requiring the method prevents this downgrade.
 - Refresh token rotation: enabled (one-time use, revoke-on-reuse for theft detection)
 
 **DCR security:**
 - Open registration (MCP spec requires anonymous DCR)
-- Rate limited: max 10 registrations per IP per hour
-- Redirect URI policy: allowlist pattern (`https://localhost:*` for CLI, registered domains for web clients)
+- Rate limited: max 10 registrations per IP per hour. **Implementation:** Keycloak has no native DCR rate limiting — implement via Cloud Armor WAF rule or ALB rate limit policy on the `/clients-registrations/` path
+- Redirect URI policy: allowlist for CLI clients: `http://localhost:*`, `http://127.0.0.1:*`, `http://[::1]:*` (per RFC 8252 §7.3, native apps use `http://` not `https://` for loopback — TLS on localhost causes cert issues). For web clients: exact-match registered URIs only (no wildcards, no pattern matching)
 - All DCR clients are **public clients** (no client_secret, PKCE mandatory)
 - Maximum client count per IP: 50
+
+**DCR Client Registration Policy (REQUIRED — Keycloak's default DCR is permissive):**
+- Force `token_endpoint_auth_method=none` (public clients only — reject confidential client registration)
+- Force `grant_types=["authorization_code"]` (reject `client_credentials`, `implicit`, `password`, device code)
+- Force `response_types=["code"]` (reject `token`, `id_token`)
+- Restrict scopes to `openid`, `email`, `profile` — strip all others including `offline_access`
+- Ignore `software_statement` parameter unless a verification key is configured
+- Ignore cosmetic metadata (`logo_uri`, `client_uri`, `policy_uri`) — not rendered, reduces stored XSS surface
+- **Registration access token (RFC 7592):** Keycloak returns a `registration_access_token` for client self-management. Either: (a) disable RFC 7592 management endpoint, or (b) restrict to read-only (no scope/redirect changes after registration). Document token lifetime and storage guidance alongside `client_id`.
+- **Client cleanup:** Set a Keycloak client policy for DCR client expiration (e.g., 90 days inactive). Without cleanup, the client table grows unbounded.
 
 **Keycloak version pinning:**
 - Pin to exact version: `quay.io/keycloak/keycloak:26.1.4@sha256:<digest>`
@@ -155,17 +166,20 @@ AI Client
 
 **Session termination / logout:**
 - User-initiated: Keycloak logout endpoint → revokes refresh tokens + sessions
-- Admin-initiated: Disable user in Keycloak → existing access tokens remain valid until expiry (up to 1 hour). JWKS cache TTL (10 min) is irrelevant here — it controls key rotation propagation, not user disablement. For immediate revocation: use Keycloak token revocation API to invalidate specific tokens, or shorten access token lifetime for sensitive operations.
+- Admin-initiated: Disable user in Keycloak → existing access tokens remain valid until expiry (up to 1 hour). Refresh tokens: Keycloak rejects refresh grants for disabled users (verify during implementation). JWKS cache TTL (10 min) is irrelevant here — it controls key rotation propagation, not user disablement. For immediate revocation: use Keycloak token revocation API to invalidate specific tokens, or shorten access token lifetime for sensitive operations.
 - Emergency: "Logout all sessions" for user + rotate realm signing key
 - ContextForge cache invalidation: ContextForge must NOT cache user identity/roles beyond the JWT lifetime. Every request re-reads claims from the JWT.
 - DCR client binding: each DCR registration records the authenticated user (if any) or originating IP, enabling "revoke all clients from IP X"
 
 **Keycloak feature hardening:**
-- Disable token exchange: `--features=token-exchange:disabled` (prevents admin impersonation of users)
-- Disable impersonation: `--features=impersonation:disabled`
+- Disable standard token exchange: `--features=token-exchange-standard:disabled` (V2, supported, **enabled by default** in 26.2+ — prevents internal token exchange between clients). Also disable legacy: `--features=token-exchange:disabled` (V1, preview, off by default — belt-and-suspenders)
+- Disable impersonation: `--features=impersonation:disabled` (**enabled by default** — must explicitly disable)
+- Disable device authorization grant: `--features=device-flow:disabled` (enabled by default — unnecessary attack surface, bypasses PKCE authorization code flow)
+- Disable CIBA: `--features=ciba:disabled` (enabled by default — backchannel auth not needed for MCP AI clients)
 - Remove `offline_access` from realm default optional client scopes (offline tokens survive logout, never expire by default — bypasses all token lifetime controls)
 - DCR client policy: strip `offline_access` from requested scopes for public clients
 - If offline tokens are needed later, set offline session idle/max lifespan to match regular policy (7-day absolute cap)
+- **Version note:** Feature availability varies by Keycloak version. `token-exchange-standard` was promoted to supported in 26.2. If pinning to 26.1.x, verify which features exist. Use `kc.sh show-config` to confirm disabled features at deploy time.
 
 **Keycloak event logging (REQUIRED — auth has no audit trail without this):**
 - Enable login event logging: `--spi-events-listener-jboss-logging-success-level=info`
@@ -251,7 +265,7 @@ This avoids the v3 Double-Auth Problem because v4 has ONE JWT issuer (Keycloak) 
 - Token reuse after logout: access tokens remain valid up to 1 hour after logout (accepted risk — JWT validation is stateless). Mitigations: short lifetime (1 hour), HTTPS-only transport, tokens never logged by ContextForge.
 - PII in JWT payload: `email` claim is PII. JWTs are signed but not encrypted (readable if intercepted). Acceptable because: HTTPS-only, short lifetime, auto-masked in structured logs. JWE not used — adds complexity without meaningful gain in this architecture.
 - Issuer (`iss`): must match Keycloak realm URL exactly
-- Audience (`aud`): must contain the gateway's client ID
+- Audience (`aud`): must contain the fixed resource-server audience value (e.g., `fluid-gateway`) configured via Keycloak realm-level audience mapper (see Section 4.1 audience mapper)
 - JWKS caching: 10-minute TTL, refresh on unknown `kid`
 - JWKS fetch failure: **fail closed** (reject all tokens)
 - Key rotation: Keycloak keeps old key in JWKS for 1 hour after rotation (matches access token lifetime)
@@ -339,7 +353,7 @@ CMD ["node", "/app/node_modules/.bin/supergateway", "--port", "8003", "--", "dev
 
 | User | Pool size | Purpose |
 |------|-----------|---------|
-| keycloak_user | 10 | Keycloak sessions, tokens, events (default 20 is too high — configure `KC_DB_POOL_INITIAL_SIZE=5`, `KC_DB_POOL_MAX_SIZE=10`) |
+| keycloak_user | 10 | Keycloak sessions, tokens, events (Keycloak production default is ~100 — far too high for db-f1-micro. Configure `KC_DB_POOL_INITIAL_SIZE=5`, `KC_DB_POOL_MAX_SIZE=10`) |
 | contextforge_user | 10 | Tool registry, audit, cache, RBAC |
 | Reserved | 5 | PostgreSQL system + superuser for maintenance |
 | **Total** | **25** | Matches db-f1-micro limit |
@@ -750,7 +764,8 @@ v3 used a 300-line `bootstrap.sh` for backend registration. v4 still needs to re
   3. Creates role-scoped virtual servers (`fluid-admin`, `fluid-viewer`)
   4. Configures RBAC teams and role mappings
 - This replaces the bash orchestration — it's a single-purpose script, not a process manager
-- Bootstrap JWT: 5-minute lifetime (not 30), expires naturally
+- Bootstrap JWT: 5-minute lifetime (not 30), expires naturally. If bootstrap exceeds 5 minutes (slow sidecar, tool discovery delay), the init container re-authenticates with Keycloak for a fresh JWT and continues (idempotent registrations prevent duplicate state)
+- **Bootstrap client scope:** The bootstrap service account in Keycloak must have ONLY the permissions needed for ContextForge Admin API (backend registration, RBAC setup) — NOT full `realm-admin` or `manage-users`. A rogue backend registered within the 5-minute window persists beyond token expiry and receives user data. Acceptance test: verify registered gateways match the expected list after bootstrap
 - Tool re-discovery: if a sidecar restarts and its tool list changes (e.g., schema update), re-registering the gateway in ContextForge refreshes the tool list. Bootstrap should be re-runnable, not just init-time. Open item: verify ContextForge gateway re-registration refreshes tool discovery.
 - Bootstrap runs as a Cloud Run job or init container, not inside the main container
 - **Bootstrap credentials:** Two-phase bootstrap: (1) Keycloak starts first with a pre-configured realm JSON (imported at container start via `--import-realm`). Realm JSON includes a bootstrap service account client. (2) Init container authenticates to Keycloak using this pre-configured client, obtains a JWT, then uses it to register backends in ContextForge. No chicken-and-egg — realm config is version-controlled and imported at startup.
@@ -816,6 +831,14 @@ v4.0 is complete when ALL of these pass:
 - [ ] ContextForge rejects requests when Keycloak is down (fail closed)
 - [ ] Audit trail records user, tool, timestamp for every tool invocation
 - [ ] Load test: 5 concurrent users, p95 latency < 2s, 0 errors (verify SLO targets before production tier)
+- [ ] **Security: auth bypass** — request with NO Bearer token returns 401 (verifies `AUTH_REQUIRED=true` is set)
+- [ ] **Security: JWT forgery** — JWT signed with wrong key returns 401 (verifies `MCP_CLIENT_AUTH_ENABLED=true`)
+- [ ] **Security: PKCE required** — authorization request without `code_challenge` is rejected by Keycloak
+- [ ] **Security: PKCE method** — authorization request with `code_challenge` but no `code_challenge_method` is rejected (not defaulted to `plain`)
+- [ ] **Security: audience** — JWT with wrong `aud` claim is rejected by ContextForge
+- [ ] **Security: feature flags** — token exchange, impersonation, device flow, CIBA endpoints all return 400/501
+- [ ] **Security: DCR restrictions** — DCR with `grant_types=["client_credentials"]` or `token_endpoint_auth_method=client_secret_basic` is rejected
+- [ ] **Security: bootstrap scope** — registered gateways after bootstrap match expected list exactly (no rogue backends)
 
 ## 17. Open items
 
@@ -860,3 +883,14 @@ v4.0 is complete when ALL of these pass:
 - [ ] Set up Cloud Run Binary Authorization for production tier
 - [ ] Add DPoP (RFC 9449) support as future enhancement when MCP spec adopts it
 - [ ] Add acceptance tests for security properties: fail-closed on JWKS failure, sidecar cannot spoof identity, DB user isolation
+- [ ] Configure Keycloak realm-level audience mapper to add fixed `fluid-gateway` audience to all tokens (DCR aud validation — Batch 7 finding)
+- [ ] Implement DCR rate limiting via Cloud Armor WAF or ALB (Keycloak has no native DCR rate limiting — Batch 7 finding)
+- [ ] Configure Keycloak Client Registration Policy: force public clients, restrict grant/response types, restrict scopes (Batch 7 finding)
+- [ ] Resolve OAuth metadata path: Keycloak serves `/.well-known/openid-configuration`, MCP expects `/.well-known/oauth-authorization-server` — design rewrite/proxy solution (Batch 7 — elevated from verification to design decision)
+- [ ] Verify `AUTH_REQUIRED` and `MCP_CLIENT_AUTH_ENABLED` upstream defaults in ContextForge source — both may default to `false` (fail-open). Add startup validation (Batch 7 finding)
+- [ ] Verify Keycloak `db-pool-max-size` actual default in production mode (spec assumed 20, likely 100 — Batch 7 finding)
+- [ ] Verify `AUTH_ENCRYPTION_SECRET` fallback behavior in ContextForge — does it silently fall back to `JWT_SECRET_KEY` if unset? (Batch 7 finding)
+- [ ] Configure Keycloak DCR client expiration policy (90 days inactive) to prevent unbounded client table growth (Batch 7 finding)
+- [ ] Verify Keycloak rejects refresh grants for disabled users (Batch 7 finding)
+- [ ] Define authorization code lifetime explicitly (Keycloak default 60s is appropriate — document it)
+- [ ] Verify PKCE Client Policy applies to DCR-created clients (must be bound to default client profile, not just manually created clients)
