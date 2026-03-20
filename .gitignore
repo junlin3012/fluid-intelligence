@@ -19,6 +19,9 @@ data/
 # Superpowers
 .superpowers/
 
+# Worktrees
+.worktrees/
+
 # Node
 node_modules/
 
