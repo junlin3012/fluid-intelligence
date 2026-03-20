@@ -21,18 +21,19 @@ Before writing code, agents MUST read:
 ## Project Structure
 
 ```
-├── deploy/          Infrastructure (Dockerfile, Cloud Build configs)
-├── scripts/         Runtime scripts (entrypoint.sh, bootstrap.sh)
-├── config/          Service configuration (mcp-config.yaml)
-├── graphql/         Shopify GraphQL operations (30 .graphql files)
-├── docs/            Architecture, runbook, research, specs, plans
-│   ├── architecture.md     System overview
-│   ├── runbook.md          Operations guide
-│   ├── agent-behavior/     Agent self-improvement docs
-│   ├── research/           Market research
-│   ├── specs/              Design specs
-│   └── plans/              Implementation plans
-└── CLAUDE.md        This file
+├── deploy/              Infrastructure (Dockerfiles, Cloud Build configs)
+├── scripts/             Runtime scripts (entrypoint.sh, bootstrap.sh)
+├── config/              Service configuration (mcp-config.yaml, defaults.env)
+├── services/            Service code (shopify_oauth)
+├── graphql/             Shopify GraphQL operations
+├── docs/
+│   ├── v3-retrospective.md      Lessons from v3 → informs v4
+│   ├── agent-behavior/          Living docs (failure log, insights, patterns)
+│   ├── operations/              Architecture overview, runbook
+│   ├── research/                Market research, capabilities analysis
+│   ├── specs/                   Active design specs (v4, OAuth, TDD)
+│   └── archive/v3/              Archived v3 specs, plans, reviews
+└── CLAUDE.md            This file
 ```
 
 ## Agent Behavior

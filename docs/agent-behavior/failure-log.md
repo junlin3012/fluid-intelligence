@@ -4,6 +4,15 @@
 
 ---
 
+## 2026-03-19: Designed Observability Without Checking ContextForge Capabilities
+
+- **What happened**: During v4 brainstorming, asked the user "Cloud Trace vs Grafana?" for observability — framing it as a new problem to solve. ContextForge already ships OpenTelemetry tracing (4 exporters), Prometheus metrics (12+ metrics), structured logging with correlation IDs, rate limiting, circuit breakers, caching, 42 plugins, and admin UI with flame graphs. Cloud Run provides automatic request metrics, error reporting, and logging. Combined, ~90% of observability needs are already free.
+- **Root cause**: Defaulted to "what should we build?" instead of "what do we already have?" The "compose don't build" principle was applied to the big architectural decision (keep ContextForge) but NOT to feature-level decisions (observability, traffic management). This is the same failure pattern as v3's config-without-reading-source-code (failure-log entries 6, 7, 8) — just at a higher abstraction level.
+- **The cognitive pattern**: When presented with a design question, the agent's default reasoning is to propose solutions. The correct default should be to inventory existing capabilities first. This pattern has now appeared at three levels: (1) config values — guessed instead of checked, (2) tool interfaces — assumed instead of verified, (3) feature design — proposed instead of inventoried.
+- **How it should have been caught**: The agent had already read `project_contextforge_capabilities.md` and `project_contextforge_plugins_deep.md` earlier in the session. The information was available in context. The failure was not lack of data but lack of process discipline.
+- **What changed**: Established a mandatory reasoning order for ALL v4 design questions: (1) What does ContextForge already do? (2) What does Cloud Run already do? (3) What's left? (4) Is there an existing tool? (5) Only then: design and build.
+- **Lesson**: "Compose don't build" is not just an architectural principle — it is a reasoning discipline that must be applied at every level of design, from high-level architecture down to individual features. The default question is never "what should we build?" It is always "what already exists?"
+
 ## 2026-03-14: Missing User Identity in MCP Gateway Design
 
 - **What happened**: Designed an entire MCP gateway with OAuth 2.1, RS256 JWT, tool aggregation, structured logging — but no concept of user identity. The system couldn't tell humans apart. Logs showed "api_key_hash:abc123" instead of "junlin."
