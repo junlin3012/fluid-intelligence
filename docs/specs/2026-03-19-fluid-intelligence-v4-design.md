@@ -231,7 +231,7 @@ AI Client
 | **Circuit breakers** | Per-tool, 3-state, configurable thresholds |
 | **Observability** | OpenTelemetry tracing (4 exporters), Prometheus metrics (12+), structured logging, correlation IDs |
 | **Caching** | Tool result caching (SHA256 key, configurable TTL). **SECURITY:** Cache keys MUST include `{tenant_id, user_role}` to prevent cross-tenant and cross-role data leakage. Without this, tenant A could see tenant B's cached Shopify data from the same tool+args, or a viewer could see an admin's cached results. Verify ContextForge cache key composition during implementation; if keys are only tool+args, disable caching or restrict to tenant-agnostic tools only. |
-| **Security** | SSRF protection, input validation, 1MB payload limit, PII filter plugin, secrets detection |
+| **Security** | SSRF protection, input validation, 1MB **request** payload limit (configurable — tool *responses* may be larger, see tool response validation in Section 8), PII filter plugin, secrets detection |
 | **Audit** | Every action logged with user, IP, correlation ID, 90-day retention |
 | **REST passthrough** | Register REST API endpoints directly as MCP tools |
 | **A2A agents** | Register external AI agents (OpenAI, Anthropic, custom) as tools |
