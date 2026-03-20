@@ -85,8 +85,8 @@ AI Client
 |-----------|------|----------|-------------------|
 | ContextForge | 8080 (Cloud Run PORT) | HTTP | Yes (Cloud Run ingress) |
 | Apollo | 8000 | Streamable HTTP or SSE | No (localhost only) |
-| dev-mcp | 8003 | SSE (via supergateway) | No (localhost only) |
-| Google Sheets | 8004 | SSE (via supergateway) | No (localhost only) |
+| dev-mcp | 8003 | SSE (via mcpgateway.translate) | No (localhost only) |
+| Google Sheets | 8004 | SSE (via mcpgateway.translate) | No (localhost only) |
 | Keycloak | 8080 | HTTP | Yes (own Cloud Run service) |
 
 ### 3.5 Auth flow
@@ -369,7 +369,7 @@ ContextForge supports multiple backend types natively. No custom proxy layers.
 | Backend type | How to add | Example |
 |---|---|---|
 | **MCP server (HTTP)** | Add as sidecar container, register in ContextForge | Apollo, any HTTP MCP server |
-| **MCP server (stdio)** | Wrap with supergateway, add as sidecar, register | dev-mcp, google-sheets |
+| **MCP server (stdio)** | Wrap with mcpgateway.translate, add as sidecar, register | dev-mcp, google-sheets |
 | **REST API** | Register directly in ContextForge via REST passthrough | Stripe, Twilio, SendGrid |
 | **A2A agent** | Register directly in ContextForge via A2A gateway | External AI agents |
 | **gRPC service** | Register directly (experimental, auto-discovery) | Internal microservices |
@@ -542,7 +542,7 @@ All provided natively. Configuration only.
 - **Admin promotion:** Explicit admin email list in Keycloak realm config (exported as JSON, version-controlled in repo). Add admin: update realm JSON → `kcadm.sh` or Keycloak Admin API. No env var domain-wide promotion.
 - Per-tool visibility via SQL-level WHERE clauses
 - Role-scoped virtual servers: `fluid-admin` (all tools), `fluid-viewer` (read-only tools)
-- Admin UI and Admin API: disabled by default for external access. Enabled during bootstrap (init container) for backend registration, then access restricted to `platform_admin` role only. The Admin API is always reachable internally for the bootstrap process but protected by JWT auth (`AUTH_REQUIRED=true`).
+- Admin UI and Admin API: disabled by default for external access. Enabled during bootstrap (run-once sidecar) for backend registration, then access restricted to `platform_admin` role only. The Admin API is always reachable internally for the bootstrap process but protected by JWT auth (`AUTH_REQUIRED=true`).
 
 ### Keycloak cold start + auth availability
 
@@ -565,7 +565,7 @@ All provided natively. Configuration only.
 - ContextForge: HTTP GET `/health` every 30s
 - Keycloak: HTTP GET `/health/live` every 30s
 - Sidecars: No HTTP liveness (they don't expose health endpoints). Rely on ContextForge's circuit breaker (5 failures → 60s cooldown) to handle degraded sidecars at runtime. If a sidecar crashes, Cloud Run restarts it based on exit code, not liveness probe.
-- **Fallback if sidecars need liveness:** Add a `/healthz` endpoint to supergateway wrappers (feature request or thin wrapper). Until then, startup probes + circuit breaker is sufficient.
+- **Fallback if sidecars need liveness:** Add a `/healthz` endpoint to mcpgateway.translate wrappers (verify if mcpgateway.translate supports health endpoints natively). Until then, startup probes + circuit breaker is sufficient.
 
 ### Audit log integrity
 
@@ -639,6 +639,15 @@ Every secret must have a defined rotation procedure. Wrong ordering causes outag
 - Prevents old (potentially vulnerable) revisions from being accessible via revision-specific URLs
 - Service uses `--allow-unauthenticated`, so revision-specific URLs are publicly reachable
 
+### HTTP security headers
+
+- `Cache-Control: no-store, no-cache` on all tool invocation responses (contain sensitive business data — must not be cached by intermediary proxies)
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` on both Cloud Run services (HSTS — prevents SSL stripping)
+- `X-Content-Type-Options: nosniff` on all responses
+- `X-Frame-Options: DENY` on Keycloak login pages and ContextForge Admin UI (prevents clickjacking)
+- **CORS:** No CORS headers on gateway MCP endpoints (AI clients are not browsers). If Admin UI needs cross-origin access, configure restrictive `Access-Control-Allow-Origin` for the admin domain only.
+- Configure at Cloud Run service level or via ContextForge middleware — not at ALB (ALB path rules handle routing, not headers).
+
 ### Error sanitization
 
 - ContextForge Pydantic/FastAPI errors must NOT expose framework name, version, or external URLs
@@ -672,8 +681,8 @@ Every secret must have a defined rotation procedure. Wrong ordering causes outag
 |-----------|-----|--------|-------|
 | ContextForge (main) | 1.0 | 2Gi | Gateway brain, largest footprint |
 | Apollo | 0.5 | 512Mi | Rust binary, efficient |
-| dev-mcp | 0.25 | 512Mi | Node.js + supergateway |
-| Google Sheets | 0.25 | 256Mi | Python + supergateway |
+| dev-mcp | 0.25 | 512Mi | Node.js + mcpgateway.translate |
+| Google Sheets | 0.25 | 256Mi | Python + mcpgateway.translate |
 | **Total instance** | **2.0** | **~3.3Gi** | Leaves headroom under 4Gi |
 
 **tmpfs mounts (required for read-only rootfs):**
@@ -798,16 +807,16 @@ v3 used a 300-line `bootstrap.sh` for backend registration. v4 still needs to re
 3. MCP clients connect to `/servers/<UUID>/mcp`
 
 **v4 bootstrap approach:**
-- A lightweight init container (or ContextForge startup hook) that:
+- A lightweight **run-once sidecar** (NOT an init container — see Section 8 sidecar orchestration) that:
   1. Waits for all sidecar health checks to pass
   2. Registers each sidecar as a gateway in ContextForge
   3. Creates role-scoped virtual servers (`fluid-admin`, `fluid-viewer`)
   4. Configures RBAC teams and role mappings
 - This replaces the bash orchestration — it's a single-purpose script, not a process manager
-- Bootstrap JWT: 5-minute lifetime (not 30), expires naturally. If bootstrap exceeds 5 minutes (slow sidecar, tool discovery delay), the init container re-authenticates with Keycloak for a fresh JWT and continues (idempotent registrations prevent duplicate state)
+- Bootstrap JWT: 5-minute lifetime (not 30), expires naturally. If bootstrap exceeds 5 minutes (slow sidecar, tool discovery delay), the bootstrap sidecar re-authenticates with Keycloak for a fresh JWT and continues (idempotent registrations prevent duplicate state)
 - **Bootstrap client scope:** The bootstrap service account in Keycloak must have ONLY the permissions needed for ContextForge Admin API (backend registration, RBAC setup) — NOT full `realm-admin` or `manage-users`. A rogue backend registered within the 5-minute window persists beyond token expiry and receives user data. Acceptance test: verify registered gateways match the expected list after bootstrap
 - Tool re-discovery: if a sidecar restarts and its tool list changes (e.g., schema update), re-registering the gateway in ContextForge refreshes the tool list. Bootstrap should be re-runnable, not just init-time. Open item: verify ContextForge gateway re-registration refreshes tool discovery.
-- Bootstrap runs as a Cloud Run job or init container, not inside the main container
+- Bootstrap runs as a Cloud Run **run-once sidecar** (starts after ContextForge is healthy, registers backends, then exits). NOT an init container (init containers run before app containers). NOT inside the main container.
 - **Bootstrap credentials:** Two-phase bootstrap: (1) Keycloak starts first with a pre-configured realm JSON (imported at container start via `--import-realm`). Realm JSON includes a bootstrap service account client. (2) Init container authenticates to Keycloak using this pre-configured client, obtains a JWT, then uses it to register backends in ContextForge. No chicken-and-egg — realm config is version-controlled and imported at startup.
 - **Idempotent:** Bootstrap must be safe to re-run (handles "already exists" 409 responses gracefully). If it crashes mid-execution, re-running completes the remaining registrations.
 
@@ -861,7 +870,7 @@ v4.0 is complete when ALL of these pass:
 - [ ] RBAC enforced: viewer sees read-only tools, admin sees all tools, no-role gets denied
 - [ ] All 3 sidecars registered and discoverable via `tools/list`
 - [ ] One user authenticates via Google OAuth and invokes a Shopify tool end-to-end
-- [ ] Bootstrap is idempotent and automated (init container)
+- [ ] Bootstrap is idempotent and automated (run-once sidecar)
 - [ ] `docker-compose up` works for dev mode
 - [ ] Cold start < 45s (lean tier, including Keycloak JVM)
 - [ ] CVE scan passes in CI/CD (no unallowed CRITICAL/HIGH)
@@ -895,13 +904,13 @@ v4.0 is complete when ALL of these pass:
 - [ ] Verify Keycloak password grant issues JWTs with proper `sub` claim (v3 fosite didn't)
 - [ ] Verify Keycloak rejects PKCE `plain` method (may accept both by default)
 - [ ] Configure Keycloak brute force detection on token/login endpoints
-- [ ] Design bootstrap init container for backend registration
+- [ ] Design bootstrap run-once sidecar for backend registration (language, base image, Dockerfile, hardening)
 - [ ] Test cold start ordering: both services scale-to-zero, gateway needs JWKS from Keycloak
 - [ ] Configure Cloud Run liveness probes per container
 - [ ] Implement GraphQL query cost estimation plugin (medium-term)
 - [ ] Configure error sanitization to prevent Pydantic framework leakage
 - [ ] Use `strict=False` for JSON parsing of ContextForge responses (unescaped newlines in tool descriptions)
-- [ ] Pin supergateway version in sidecar Dockerfiles (check latest stable at implementation time)
+- [ ] ~~Pin supergateway version~~ OBSOLETE — supergateway replaced by mcpgateway.translate (Batch 8). Remove this item.
 - [ ] Pin @shopify/dev-mcp version in package-lock.json
 - [ ] Pin xing5/mcp-google-sheets version in requirements lock file
 - [ ] Pin Apollo to specific commit hash (not just tag v1.9.0)
@@ -912,7 +921,7 @@ v4.0 is complete when ALL of these pass:
 - [ ] Specify Google Sheets sidecar Dockerfile (port 8004, Python base, non-root, tini)
 - [ ] Configure Keycloak DCR client policy: Web Origins = empty (no CORS by default for public clients)
 - [ ] Verify license for xing5/mcp-google-sheets (must be permissive: MIT/Apache/BSD)
-- [ ] Verify supergateway npm package provenance and maintainer — vendor if insufficient
+- [ ] ~~Verify supergateway provenance~~ OBSOLETE — supergateway replaced by mcpgateway.translate (Batch 8). Remove this item.
 - [ ] Keycloak realm JSON export: use `--no-credentials` flag, replace secrets with placeholders, run gitleaks on realm JSON before committing
 - [ ] Define `.cve-allowlist` governance: required fields (CVE ID, justification, approver, date, review-by), CI warns when fix becomes available
 - [ ] Implement `HTTP_AUTH_RESOLVE_USER` plugin hook to derive ContextForge roles from JWT claims per-request (not from DB)
