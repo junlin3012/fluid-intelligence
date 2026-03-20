@@ -297,24 +297,25 @@ This avoids the v3 Double-Auth Problem because v4 has ONE JWT issuer (Keycloak) 
 
 ### 4.4 dev-mcp (Shopify Docs — sidecar)
 
-**What:** @shopify/dev-mcp wrapped by supergateway.
+**What:** @shopify/dev-mcp wrapped by ContextForge's `mcpgateway.translate`.
 **Why sidecar:** stdio-only server, needs HTTP translation.
-**Container:** `FROM node:22-slim` + supergateway + dev-mcp
+**Why mcpgateway.translate over supergateway:** Already proven in v3 production. Part of ContextForge (Apache 2.0, IBM-backed). Eliminates a third-party npm dependency from the shared trust boundary. See sidecar isolation model (Section 8) for full rationale.
+**Container:** ContextForge base image + dev-mcp (Node.js)
 
 ```dockerfile
-FROM node:22.14.0-slim AS builder
+FROM node:22.14.0-slim@sha256:<digest> AS devmcp-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --production
 
-FROM node:22.14.0-slim
-RUN apt-get update && apt-get install -y tini && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/node_modules /app/node_modules
-USER node
+FROM <contextforge-base>
+COPY --from=devmcp-deps /app/node_modules /app/devmcp-modules
+USER 1001
 EXPOSE 8003
-ENTRYPOINT ["tini", "--"]
-CMD ["node", "/app/node_modules/.bin/supergateway", "--port", "8003", "--", "dev-mcp"]
+CMD ["python", "-m", "mcpgateway.translate", "--stdio", "node /app/devmcp-modules/.bin/dev-mcp", "--expose-sse", "--port", "8003"]
 ```
+
+**Note:** This Dockerfile is illustrative. The exact structure depends on whether mcpgateway.translate runs as a sidecar process or is invoked from within the ContextForge container. In v3, it runs inside the ContextForge process. In v4 with sidecars, it may need its own container with both Python (for translate) and Node.js (for dev-mcp). Resolve during implementation.
 
 **Hardening requirements (all sidecar containers):**
 - Non-root user (`USER node` for Node.js, `USER 1001` for Python)
@@ -326,10 +327,10 @@ CMD ["node", "/app/node_modules/.bin/supergateway", "--port", "8003", "--", "dev
 
 ### 4.5 Google Sheets MCP (sidecar)
 
-**What:** xing5/mcp-google-sheets wrapped by supergateway.
+**What:** xing5/mcp-google-sheets wrapped by ContextForge's `mcpgateway.translate`.
 **Why sidecar:** stdio-only server, needs HTTP translation.
 **Auth:** Service account (headless-compatible)
-**Container:** Same hardening pattern as dev-mcp — pinned Python base, non-root user, `uv pip install` with `--require-hashes` from locked requirements, tini for signals, read-only rootfs.
+**Container:** Same pattern as dev-mcp — mcpgateway.translate wrapping the stdio server. Pinned Python base, non-root user, `uv pip install` with `--require-hashes` from locked requirements, tini for signals, read-only rootfs.
 
 ### 4.6 PostgreSQL (Cloud SQL)
 
@@ -414,7 +415,7 @@ All provided natively. Configuration only.
 | Capability | Config |
 |-----------|--------|
 | Distributed tracing | `OTEL_ENABLE_OBSERVABILITY=true`, `OTEL_TRACES_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com` |
-| Prometheus metrics | `ENABLE_METRICS=true`, scrape `/metrics/prometheus` |
+| Prometheus metrics | `ENABLE_METRICS=true`, scrape `/metrics/prometheus`. **SECURITY:** This endpoint is on port 8080 (externally reachable). It exposes tool names, request rates, error rates, backend health, memory usage. Must be protected: either (a) configure ContextForge to require JWT auth on `/metrics/*`, or (b) disable external metrics and rely on Cloud Monitoring (which provides the same data automatically). |
 | Structured logging | `LOG_LEVEL=INFO`, auto-masks secrets, correlation IDs on every request |
 | Internal trace viewer | `OBSERVABILITY_ENABLED=true`, Admin UI at `/admin/observability` |
 | Tool telemetry | ToolsTelemetryExporter plugin (built-in, priority 200) |
@@ -430,7 +431,7 @@ All provided natively. Configuration only.
 ### Sidecar logging and trace propagation
 
 - Sidecar containers should write JSON-structured logs to stdout where possible (Cloud Logging auto-parses)
-- If sidecar logs are unstructured (Apollo Rust `tracing`, supergateway console.log), accept this — ContextForge's structured logs with correlation IDs are the primary observability source
+- If sidecar logs are unstructured (Apollo Rust `tracing`, mcpgateway.translate Python logging), accept this — ContextForge's structured logs with correlation IDs are the primary observability source
 - **Trace context propagation:** When ContextForge calls sidecars on localhost, HTTP requests MUST include `traceparent` headers (W3C Trace Context). Sidecars should propagate these headers for end-to-end distributed tracing. Without this, sidecar logs use independent request IDs (same v3 problem in new topology).
 
 ### Alerting (config-only)
@@ -454,9 +455,12 @@ All provided natively. Configuration only.
 **Sidecar isolation model (explicitly documented):**
 - All sidecars share the instance's service account and network namespace
 - A compromised sidecar has the same Secret Manager access and Cloud SQL connectivity as ContextForge
-- This is acceptable because sidecars run known code — Apollo (Rust, open-source, Apollo GraphQL team) and supergateway wrappers
-- **supergateway trust note:** supergateway is a third-party npm package running in the shared trust boundary with full data visibility. Mitigations: (a) vendor the specific version into Artifact Registry or repo, (b) include in CVE scanning scope, (c) verify maintainer identity and release signing before adoption, (d) consider ContextForge's native `mcpgateway.translate` as a zero-third-party alternative if supergateway provenance is insufficient
-- If untrusted MCP servers are added in future, they MUST be separate Cloud Run services with minimal-privilege service accounts
+- **GCP metadata service exposure:** All sidecars can reach `http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token` to obtain the `gateway-sa@` OAuth2 access token. This gives Secret Manager access, Cloud SQL connectivity, and Cloud Run invoker on Keycloak. Cloud Run does not support per-container metadata restrictions. **Accepted risk** for trusted sidecars; this is the primary reason untrusted sidecars MUST be separate services.
+- **Sidecar-to-sidecar network access:** Sidecars can reach each other on localhost without authentication (Apollo:8000, dev-mcp:8003, Sheets:8004). A compromised sidecar can invoke other sidecars' tools directly, **bypassing ContextForge's RBAC, rate limiting, and audit trail entirely**. For example, a compromised dev-mcp could execute arbitrary Shopify GraphQL mutations via Apollo. **Accepted risk** for trusted sidecars — all sidecars run known open-source code with no third-party runtime dependencies (see stdio bridge decision below).
+- **Localhost traffic is unencrypted.** HTTP between ContextForge and sidecars means Bearer tokens in transit on localhost are observable. A compromised sidecar can sniff localhost traffic. Mitigated by: JWT short lifetime (1 hour), sidecars are trusted code, and mTLS on localhost is not practical for Cloud Run sidecars.
+- This is acceptable because sidecars run known code — Apollo (Rust, Apollo GraphQL team), and ContextForge's native `mcpgateway.translate` for stdio bridges (see below)
+- **stdio bridge: use `mcpgateway.translate` (NOT supergateway).** v3 production already uses `mcpgateway.translate` successfully for both dev-mcp and Google Sheets bridges. It is part of ContextForge (Apache 2.0, IBM-backed), eliminates the supergateway third-party dependency entirely, and keeps the trust boundary to known, auditable code. Introducing supergateway would be a security regression — adding a third-party npm package from a small startup (supercorp-ai) into the shared trust boundary with full MCP traffic visibility. Design principle: "Configure, don't build" + "Direct effort toward unsolved problems."
+- If untrusted MCP servers are added in future, they MUST be separate Cloud Run services with minimal-privilege service accounts (metadata service access is the primary blocker for the sidecar model with untrusted code)
 
 **SSRF protection:**
 - `SSRF_ALLOW_LOCALHOST=false` and `SSRF_ALLOW_PRIVATE_NETWORKS=false` as defaults
@@ -502,7 +506,7 @@ All provided natively. Configuration only.
 ### Secrets management
 
 - All secrets in GCP Secret Manager
-- Cloud Run injects via `--set-secrets` (env vars or volume mounts)
+- Cloud Run injects via `--set-secrets` using **volume mounts** (NOT env vars). Env var injection exposes secrets via `/proc/1/environ` — any process with the same UID (or a compromised sidecar via metadata service → Secret Manager) can read them. Volume mounts place secrets as files (e.g., `/secrets/db-password`) which are per-container and not exposed in `/proc`. Application code reads from file paths instead of `os.environ`.
 - Each service owns its own secrets (no sharing between Keycloak and gateway)
 - **Per-service service accounts:** `keycloak-sa@` and `gateway-sa@` with IAM bindings only to their own secrets (least privilege)
 - Key rotation: Secret Manager versioning + Keycloak key rotation for JWTs
@@ -521,7 +525,9 @@ All provided natively. Configuration only.
 - No runtime dependency fetching (everything installed at build time with lock files)
 - Dependencies pinned with lock files (`package-lock.json`, pip freeze, `Cargo.lock`)
 - Read-only root filesystem on all containers (`readOnlyRootFilesystem: true`)
-- Explicit `.dockerignore` in every build context
+- `allowPrivilegeEscalation: false` in every container's security context (prevents SUID binary exploitation)
+- Strip SUID/SGID bits in Dockerfiles for non-distroless images: `RUN find / -perm /6000 -type f -exec chmod a-s {} + || true`
+- Explicit `.dockerignore` in every build context (must exclude: `.git/`, `docs/`, `.env*`, `node_modules/`, `*.md`, `.claude/`, `deploy/`, `scripts/`, `config/`, `services/`, `graphql/`)
 - Cloud Run Binary Authorization: mandatory for production tier, optional for dev/lean
 - Node.js pinned to exact version (`node:22.14.0-slim`)
 
@@ -666,7 +672,7 @@ The gateway processes tenant PII (Shopify customer names, emails, addresses, ord
 ### Network policy between services
 
 - **Gateway-to-Keycloak JWKS:** Use Direct VPC Egress on the gateway service. Set Keycloak `--ingress=internal-and-cloud-load-balancing`. Gateway calls Keycloak via standard `*.run.app` URL over the VPC network, bypassing public internet. (`*.run.internal` does not exist — use VPC networking instead.)
-- Public access to Keycloak: route only `/realms/*` and `/.well-known/*` via public ingress (Application Load Balancer with path rules), blocking `/admin/*`.
+- Public access to Keycloak: ALB uses **allowlist** path rules (not blocklist). Allowed paths: `/realms/*`, `/.well-known/*`, `/js/*` (login page JS), `/resources/*` (login page CSS/images). All other paths (including `/admin/*`, `/health/*`, `/metrics`) are blocked by default. Login pages depend on `/js/` and `/resources/` to render — blocking them breaks OAuth redirect flows.
 - Admin console: accessible only via VPN/IAP or `kcadm.sh` from Cloud Run jobs (see Keycloak admin console security above).
 
 ## 9. CI/CD
@@ -684,9 +690,20 @@ Two-layer Docker build (carried from v3):
 3. Build container images
 4. **CVE scan** — `trivy image` on all built images. Gate: CRITICAL or HIGH with fix available = build fails. Unfixable CVEs tracked in `.cve-allowlist`.
 5. **SBOM generation** — `syft` on each image, output CycloneDX JSON, push as Artifact Registry attestation
-6. Push to Artifact Registry
-7. Deploy to Cloud Run
-8. Health check verification (Keycloak JWKS reachable, ContextForge `/health` 200, all sidecars healthy)
+6. **Image signing** — sign images with `cosign` using Cloud KMS key. Generate SLSA provenance via Cloud Build's `--requested-verify-option=VERIFIED`
+7. Push to Artifact Registry
+8. Deploy to Cloud Run (Binary Authorization verifies cosign signature + SLSA provenance before admitting image)
+9. **Post-deploy digest verification** — `gcloud run revisions describe --format='value(image)'` must match the built image's `@sha256:` digest
+10. Health check verification (Keycloak JWKS reachable, ContextForge `/health` 200, all sidecars healthy)
+
+**Cloud Build trigger security:**
+- Production deploys trigger ONLY on push to `main` branch (`branchName: "^main$"`)
+- `main` branch requires: at least 1 approving review, status checks passing, no force pushes
+- Feature branches may trigger staging/dev builds but never production deploys
+
+**Base image rebuild cadence:**
+- Weekly scheduled Cloud Build trigger rebuilds all `Dockerfile.base` images and runs trivy
+- If new CVEs found, auto-trigger the full pipeline
 
 ### Dependency integrity (v3 gaps fixed)
 
@@ -894,3 +911,15 @@ v4.0 is complete when ALL of these pass:
 - [ ] Verify Keycloak rejects refresh grants for disabled users (Batch 7 finding)
 - [ ] Define authorization code lifetime explicitly (Keycloak default 60s is appropriate — document it)
 - [ ] Verify PKCE Client Policy applies to DCR-created clients (must be bound to default client profile, not just manually created clients)
+- [ ] Resolve mcpgateway.translate sidecar topology: in v3 it runs inside the ContextForge monolith. In v4 sidecars, determine if translate runs as its own container or as a subprocess within a dual-runtime container (Batch 8 finding)
+- [ ] Protect `/metrics/prometheus` endpoint: either require JWT auth or disable external metrics (rely on Cloud Monitoring). Currently publicly reachable on port 8080 (Batch 8 finding)
+- [ ] Protect `/admin/*` endpoints on gateway: document mechanism (ContextForge config flag or JWT + RBAC only). Currently relies solely on JWT auth — if `AUTH_REQUIRED` defaults to false, Admin API is wide open (Batch 8 finding)
+- [ ] Cloud SQL: explicitly disable public IP (`--no-assign-ip`) if not already (Batch 8 finding)
+- [ ] Restrict Artifact Registry reader access to `gateway-sa@`, `keycloak-sa@`, `cloudbuild-sa@` only — deny `allUsers`/`allAuthenticatedUsers` (Batch 8 finding)
+- [ ] Restrict Cloud Build log viewer access to deployment personnel only (build logs expose dependency versions, CVE allowlist) (Batch 8 finding)
+- [ ] Pin CI/CD scanning tools (trivy, syft, trufflehog, gitleaks) by container image digest in `cloudbuild.yaml` (Batch 8 finding)
+- [ ] Create Cloud KMS key for cosign image signing (Batch 8 finding)
+- [ ] Add `max-instances` per scaling tier: lean=1, production=3, enterprise=10 (Batch 8 finding)
+- [ ] Evaluate Cloud Armor WAF for pre-auth rate limiting on gateway (unauthenticated floods bypass ContextForge rate limiting) (Batch 8 finding)
+- [ ] Add `noexec` mount option to tmpfs mounts where possible (prevents code execution from tmpfs) (Batch 8 finding)
+- [ ] Budget tmpfs within memory limits: 768Mi total tmpfs reduces effective application memory from 3.3Gi to ~2.5Gi (Batch 8 finding)
