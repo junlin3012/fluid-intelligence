@@ -24,6 +24,14 @@ docker-compose.yml              # Rewritten — 6 services, SSO config
 .env.example                    # Rewritten — v5 variables
 config/dev.env                  # Rewritten — local dev overrides
 config/prod.env                 # Rewritten — production values
+postman/                        # Postman collection exports (JSON)
+├── Fluid-Intelligence-Keycloak.json
+├── Fluid-Intelligence-Gateway.json
+├── Fluid-Intelligence-Acceptance.json
+└── environments/
+    ├── keycloak-prod.json
+    ├── gateway-local.json
+    └── gateway-prod.json
 docs/specs/v5-contextforge-capabilities.md   # Phase 0 research
 docs/specs/v5-keycloak-capabilities.md       # Phase 0 research
 docs/specs/v5-feature-to-config-map.md       # Phase 0 deliverable
@@ -74,6 +82,33 @@ tests/plugins/                  # Tests for deleted plugin
 ---
 
 ## Phase 0: Deep Capability Audit
+
+### Task 0.0: Create v5 branch and worktree
+
+- [ ] **Step 1: Create worktree**
+
+```bash
+git worktree add .worktrees/v5-implementation -b feature/v5-implementation
+cd .worktrees/v5-implementation
+```
+
+- [ ] **Step 2: Verify .worktrees/ is gitignored**
+
+```bash
+git check-ignore -q .worktrees && echo "OK" || echo "Add to .gitignore"
+```
+
+- [ ] **Step 3: Create Postman export directory**
+
+```bash
+mkdir -p postman/environments
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git commit --allow-empty -m "chore: start v5 implementation branch"
+```
 
 ### Task 0.1: Invoke `context7` — ContextForge exhaustive audit
 
@@ -255,9 +290,10 @@ Use the Postman MCP tools to create collection `Fluid-Intelligence-Keycloak` wit
 
 - [ ] **Step 2: Run Folders 2 + 4 — verify all assertions pass**
 - [ ] **Step 3: If assertions fail, run Folder 3 to fix gaps, then re-run Folder 4**
-- [ ] **Step 4: Commit Postman collection export**
+- [ ] **Step 4: Export collection to `postman/Fluid-Intelligence-Keycloak.json` and commit**
 
 ```bash
+git add postman/Fluid-Intelligence-Keycloak.json postman/environments/keycloak-prod.json
 git commit -m "feat(phase-1): Keycloak Postman collection — verify + configure + test
 
 Skills invoked: postman"
@@ -362,10 +398,23 @@ services:
 ```
 
 - [ ] **Step 3: Write `.env.example`**
-- [ ] **Step 4: Commit**
+
+- [ ] **Step 4: Write `config/dev.env`** (local dev overrides — auth off, SSRF relaxed, DEBUG)
+
+- [ ] **Step 5: Write `config/prod.env`** (production values — auth on, SSRF strict, INFO logging)
+
+Reference v4 values at `.worktrees/v4-implementation/config/prod.env` but rewrite for v5 (SSO instead of proxy auth).
+
+- [ ] **Step 6: Cherry-pick `scripts/init-postgres.sql` and `scripts/init-postgres-wrapper.sh` from v4**
+
+Read: `.worktrees/v4-implementation/scripts/init-postgres.sql` (audit every line)
+Read: `.worktrees/v4-implementation/scripts/init-postgres-wrapper.sh` (audit every line)
+These are needed by the docker-compose postgres service `entrypoint-initdb.d`.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add docker-compose.yml .env.example
+git add docker-compose.yml .env.example config/dev.env config/prod.env scripts/init-postgres.sql scripts/init-postgres-wrapper.sh
 git commit -m "feat(phase-2): docker-compose with ContextForge SSO — zero custom code"
 ```
 
@@ -722,8 +771,9 @@ gcloud builds submit --config=deploy/cloudbuild.yaml --project=junlinleather-mcp
 - [ ] **Step 2: Deploy**
 
 ```bash
-gcloud run services replace deploy/cloud-run-gateway-v5.yaml --region=asia-southeast1 --project=junlinleather-mcp
+gcloud run services replace deploy/cloud-run-gateway.yaml --region=asia-southeast1 --project=junlinleather-mcp
 ```
+Note: The YAML's `metadata.name` is `fluid-intelligence-v5` (parallel to v3). The file is `deploy/cloud-run-gateway.yaml` (same as cherry-picked, updated in Task 4.3).
 
 - [ ] **Step 3: Add allUsers invoker**
 
@@ -818,7 +868,41 @@ Run: `bash scripts/setup-monitoring.sh`
 - [ ] **Step 4: Enable cosign image signing in Cloud Build**
 - [ ] **Step 5: Commit**
 
-### Task 5.5: Final regression
+### Task 5.5: Cherry-pick remaining infrastructure files
+
+- [ ] **Step 1: Audit and cherry-pick `scripts/test-v4-regression.sh`**
+
+Read: `.worktrees/v4-implementation/scripts/test-v4-regression.sh` (update URLs for v5)
+Copy to: `scripts/test-v5-regression.sh`
+
+- [ ] **Step 2: Audit and cherry-pick `config/.digests`**
+
+Read: `.worktrees/v4-implementation/config/.digests`
+Update with v5 image digests (recorded during Phase 4 builds).
+
+- [ ] **Step 3: Cherry-pick remaining infra scripts (audit each)**
+
+```bash
+# From v4, audit every line:
+scripts/setup-cloud-sql-v4.sh → scripts/setup-cloud-sql.sh (rename, audit)
+scripts/setup-iam-v4.sh → scripts/setup-iam.sh (rename, audit)
+scripts/setup-alb.sh (audit as-is)
+scripts/setup-monitoring.sh (audit as-is)
+scripts/setup-cloud-sql-security.sh (audit as-is)
+deploy/cloud-armor.yaml (audit as-is)
+```
+
+- [ ] **Step 4: Commit**
+
+- [ ] **Step 5: Clean up v4 worktree**
+
+```bash
+git worktree remove .worktrees/v4-implementation
+```
+
+The v4 branch `feature/v4-implementation` remains in git history for reference but the worktree is cleaned up.
+
+### Task 5.6: Final regression
 
 - [ ] **Step 1: Run all unit tests**
 
@@ -830,7 +914,7 @@ python3 -m pytest tests/ -v --ignore=tests/shopify_oauth
 - [ ] **Step 3: Browser login via claude-in-chrome — works**
 - [ ] **Step 4: All 25 skill invocations documented in commit messages**
 
-### Task 5.6: Phase 5 gate check (FINAL)
+### Task 5.7: Phase 5 gate check (FINAL)
 
 - [ ] All 23 acceptance criteria pass in Postman
 - [ ] All 7 Phase 5 security skills invoked
