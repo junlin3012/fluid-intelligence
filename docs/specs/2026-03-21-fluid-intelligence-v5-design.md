@@ -19,7 +19,7 @@ v4's architecture was sound. v4's execution was not. v5 uses the **same architec
 |-----------|--------|
 | 741 lines of custom code replaced by 9 env vars | **Configure first, code never** — Phase 0 capability audit before any work |
 | 15 failed deploys | **Local first, cloud last** — docker-compose verified before Cloud Run |
-| 0 security skills invoked | **14 skills mandatory** — tracked as tasks, not comments |
+| 0 security skills invoked | **25 skill invocations across 14 unique skills** — tracked as tasks, not comments |
 | No browser testing until the end | **claude-in-chrome after every phase** — browser proof required |
 | curl scripts for API management | **Postman collections** — organized, reusable, with test assertions |
 
@@ -152,7 +152,7 @@ All API calls (Keycloak Admin, ContextForge Admin, acceptance tests) organized a
   ```
 - `scripts/configure-keycloak-policies.sh` — idempotent Admin API calls (exported from Postman)
 
-**Acceptance criteria tested:** #1, #5, #12, #16-23
+**Acceptance criteria tested:** #1, #5 (IdP config only), #12, #18, #19, #21, #22 (Keycloak-only criteria. Auth bypass #16, JWT forgery #17, audience #20, bootstrap scope #23 require the gateway — tested in Phase 5)
 
 **Gate:** All Postman assertions in folders 2 + 4 pass. Browser login verified via claude-in-chrome screenshot/GIF.
 
@@ -212,7 +212,9 @@ DATABASE_URL=postgresql://contextforge:password@postgres:5432/contextforge
 2. Resolve Apollo commit hash (verify v1.9.0 or newer)
 3. Run `npm install` for dev-mcp lockfile, verify sheets pip version
 4. Add sidecars + bootstrap to docker-compose
-5. `docker-compose up` → all containers healthy
+   → Bootstrap runs as a `restart: "no"` service (one-shot init container pattern)
+   → Depends on ContextForge being healthy
+5. `docker-compose up` → all containers healthy, bootstrap exits 0
 6. Bootstrap registers 3 backends → tools appear in ContextForge
 7. Call a tool via Postman → verify result
 
@@ -253,6 +255,7 @@ DATABASE_URL=postgresql://contextforge:password@postgres:5432/contextforge
 **What happens:**
 1. Invoke securing-serverless-functions BEFORE any deploy
 2. Audit v4 Cloud Run YAML line by line → cherry-pick multi-container template
+   → Known gotchas from v4: no `terminationGracePeriodSeconds` in single-container YAML, TCP liveness probes NOT supported (use HTTP), `allUsers` invoker binding lost on service delete/recreate, `gcloud run services replace` does NOT do env var substitution
 3. Build sidecar images via Cloud Build
 4. Deploy gateway multi-container service
 5. Verify via claude-in-chrome: SSO login → admin UI → tool execution
@@ -307,9 +310,9 @@ Each request has test assertions that produce a pass/fail result.
 |---|-----------|-------------|------------|
 | 1 | Keycloak issues JWTs via OAuth 2.1 + PKCE S256 | Phase 1 | Postman |
 | 2 | ContextForge validates Keycloak JWTs via JWKS | Phase 2 | Postman |
-| 3 | RBAC enforced (admin/user/readonly) | Phase 2 | Postman |
+| 3 | RBAC enforced (admin/user/readonly) | Phase 3 | Postman (different roles → different tool access) |
 | 4 | All 3 sidecars registered and healthy | Phase 3 | Postman |
-| 5 | Google OAuth end-to-end login | Phase 1 | claude-in-chrome |
+| 5 | Google OAuth end-to-end login | Phase 1 (IdP config) + Phase 2 (e2e flow) | Postman (Phase 1) + claude-in-chrome (Phase 2) |
 | 6 | Bootstrap idempotent | Phase 3 | Postman (run twice) |
 | 7 | docker-compose up works | Phase 2 | docker-compose up |
 | 8 | Cold start < 45s | Phase 5 | Timer |
@@ -404,7 +407,26 @@ Every skill is a checkboxed TASK — not a comment.
 | 5 | ~$5 | Security scans + hardening |
 | **Total** | **~$22** | **vs $43 in v4 (49% reduction)** |
 
-## 11. What This Spec Does NOT Cover
+## 11. Rollback Strategy
+
+v5 deploys as a **NEW Cloud Run service** (`fluid-intelligence-v5`), parallel to v3 (`fluid-intelligence`). v3 continues running until v5 passes all 23 acceptance criteria. Only then is v3 decommissioned.
+
+If v5 fails:
+- Delete `fluid-intelligence-v5` Cloud Run service
+- v3 continues serving (unaffected)
+- Keycloak continues running (shared, not tied to gateway version)
+
+This zero-downtime approach means v5 deployment is risk-free to the existing system.
+
+## 12. Cloud SQL Final-State Connectivity
+
+**Keycloak (Java/JDBC):** Public IP with restricted authorized networks (Cloud Run egress IP ranges only, not 0.0.0.0/0). JDBC URL: `jdbc:postgresql://PUBLIC_IP:5432/keycloak`. VPC connector not used because JDBC doesn't support Unix sockets without a socket factory JAR.
+
+**ContextForge (Python/SQLAlchemy):** Cloud SQL connector annotation (`--add-cloudsql-instances`) with Unix socket. DATABASE_URL: `postgresql://user:pass@/contextforge?host=/cloudsql/INSTANCE`.
+
+This is documented because v4 tried 5 different connection methods before finding these.
+
+## 13. What This Spec Does NOT Cover
 
 - Tenant context injection (Phase 6 — separate spec after v5 is working)
 - Google OAuth client credentials (requires Google Cloud Console setup by user)
