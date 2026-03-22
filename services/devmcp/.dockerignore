@@ -1,0 +1,12 @@
+# Exclude node_modules — npm ci in the Dockerfile installs from package-lock.json
+node_modules/
+
+# Exclude lock file if it's not present (will cause npm ci to fail — keep it)
+# package-lock.json is intentionally NOT excluded
+
+# Exclude development/editor artifacts
+.DS_Store
+*.log
+npm-debug.log*
+.env
+.env.*

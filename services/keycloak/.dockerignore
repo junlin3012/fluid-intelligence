@@ -1,0 +1,33 @@
+# ── Secrets & environment ────────────────────────────────────
+.env
+.env.*
+*.env
+*.secret
+
+# ── Version control ──────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Claude / AI tooling ──────────────────────────────────────
+.claude
+.claude.json
+.claude-plugin
+
+# ── Documentation ────────────────────────────────────────────
+docs/
+*.md
+!README.md
+
+# ── Local development artifacts ──────────────────────────────
+*.log
+*.tmp
+*.bak
+__pycache__/
+node_modules/
+.DS_Store
+
+# ── CI/CD configs (not needed in image) ─────────────────────
+.github/
+cloudbuild.yaml
+cloudbuild*.yaml

@@ -1,0 +1,8 @@
+{
+  "name": "devmcp-sidecar",
+  "private": true,
+  "description": "Dependency manifest for @shopify/dev-mcp in the dev-mcp sidecar container.",
+  "dependencies": {
+    "@shopify/dev-mcp": "1.7.2"
+  }
+}

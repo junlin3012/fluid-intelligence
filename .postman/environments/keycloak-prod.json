@@ -1,0 +1,9 @@
+{
+  "name": "keycloak-prod",
+  "values": [
+    {"key": "KC_URL", "value": "https://keycloak-apanptkfaq-as.a.run.app", "enabled": true},
+    {"key": "REALM", "value": "fluid", "enabled": true},
+    {"key": "ADMIN_PASSWORD", "value": "FILL_FROM_SECRET_MANAGER", "enabled": true},
+    {"key": "BOOTSTRAP_SECRET", "value": "FILL_FROM_KEYCLOAK_ADMIN", "enabled": true}
+  ]
+}

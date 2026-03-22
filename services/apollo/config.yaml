@@ -1,0 +1,25 @@
+# Apollo MCP Server config — Shopify GraphQL
+endpoint: https://${env.SHOPIFY_STORE}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json
+
+transport:
+  type: streamable_http
+  address: 0.0.0.0
+  port: 8000
+  host_validation:
+    enabled: true
+    allowed_hosts:
+      - apollo-apanptkfaq-as.a.run.app
+      - apollo-1056128102929.asia-southeast1.run.app
+
+schema:
+  source: local
+  path: /app/shopify-schema.graphql
+
+introspection:
+  execute:
+    enabled: true
+  validate:
+    enabled: true
+
+headers:
+  X-Shopify-Access-Token: ${env.SHOPIFY_ACCESS_TOKEN}

@@ -1,0 +1,5 @@
+# Google Sheets MCP server — stdio subprocess spawned by mcpgateway.translate
+# Source: https://github.com/xing5/mcp-google-sheets
+# TODO: Verify the exact latest stable version before building.
+#   Run: pip index versions mcp-google-sheets
+mcp-google-sheets==0.4.1

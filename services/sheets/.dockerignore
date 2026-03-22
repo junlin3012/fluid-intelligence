@@ -1,0 +1,5 @@
+# Ignore everything by default; only COPY what is explicitly needed.
+*
+
+# Allow the files referenced in the Dockerfile.
+!requirements.txt

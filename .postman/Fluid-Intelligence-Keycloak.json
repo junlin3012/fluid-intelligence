@@ -1,0 +1,381 @@
+{
+  "info": {
+    "name": "Fluid-Intelligence-Keycloak",
+    "description": "Keycloak Admin API collection for Fluid Intelligence v5.\n\nPhase 1: Verify existing Keycloak, configure gaps (PKCE, MFA, DCR, UserProfile), run acceptance tests.\n\nImport this collection into Postman, then import the keycloak-prod environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "KC_URL", "value": "https://keycloak-apanptkfaq-as.a.run.app"},
+    {"key": "REALM", "value": "fluid"},
+    {"key": "ADMIN_TOKEN", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "1. Auth Token",
+      "item": [
+        {
+          "name": "Get Admin Token",
+          "request": {
+            "method": "POST",
+            "url": "{{KC_URL}}/realms/master/protocol/openid-connect/token",
+            "header": [{"key": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "client_id", "value": "admin-cli"},
+                {"key": "username", "value": "admin"},
+                {"key": "password", "value": "{{ADMIN_PASSWORD}}"},
+                {"key": "grant_type", "value": "password"}
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Admin token obtained', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.access_token).to.be.a('string');",
+                  "  pm.collectionVariables.set('ADMIN_TOKEN', json.access_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Verify Current State",
+      "item": [
+        {
+          "name": "OIDC Discovery — HTTPS issuer",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/realms/{{REALM}}/.well-known/openid-configuration"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('OIDC discovery returns 200', function() { pm.response.to.have.status(200); });",
+            "pm.test('Issuer is HTTPS', function() {",
+            "  var json = pm.response.json();",
+            "  pm.expect(json.issuer).to.match(/^https:\\/\\//);",
+            "});",
+            "pm.test('Has required endpoints', function() {",
+            "  var json = pm.response.json();",
+            "  pm.expect(json).to.have.property('authorization_endpoint');",
+            "  pm.expect(json).to.have.property('token_endpoint');",
+            "  pm.expect(json).to.have.property('jwks_uri');",
+            "  pm.expect(json).to.have.property('registration_endpoint');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "JWKS — RS256 key present",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/realms/{{REALM}}/protocol/openid-connect/certs"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('JWKS returns keys', function() {",
+            "  var json = pm.response.json();",
+            "  pm.expect(json.keys).to.be.an('array').that.is.not.empty;",
+            "});",
+            "pm.test('Has RS256 signing key', function() {",
+            "  var json = pm.response.json();",
+            "  var rs256 = json.keys.filter(k => k.alg === 'RS256');",
+            "  pm.expect(rs256.length).to.be.at.least(1);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "List Clients — fluid clients exist",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/clients?briefRepresentation=true",
+            "header": [{"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('fluid-bootstrap exists', function() {",
+            "  var clients = pm.response.json().map(c => c.clientId);",
+            "  pm.expect(clients).to.include('fluid-bootstrap');",
+            "});",
+            "pm.test('fluid-gateway exists', function() {",
+            "  var clients = pm.response.json().map(c => c.clientId);",
+            "  pm.expect(clients).to.include('fluid-gateway');",
+            "});",
+            "pm.test('fluid-gateway-sso exists', function() {",
+            "  var clients = pm.response.json().map(c => c.clientId);",
+            "  pm.expect(clients).to.include('fluid-gateway-sso');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "List IdPs — Google configured",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/identity-provider/instances",
+            "header": [{"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Google IdP exists', function() {",
+            "  var aliases = pm.response.json().map(i => i.alias);",
+            "  pm.expect(aliases).to.include('google');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Realm Settings — brute force enabled",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}",
+            "header": [{"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Brute force protection enabled', function() {",
+            "  pm.expect(pm.response.json().bruteForceProtected).to.be.true;",
+            "});",
+            "pm.test('Events enabled', function() {",
+            "  pm.expect(pm.response.json().eventsEnabled).to.be.true;",
+            "});",
+            "pm.test('90-day event retention', function() {",
+            "  pm.expect(pm.response.json().eventsExpiration).to.equal(7776000);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Token Exchange — disabled (400)",
+          "request": {
+            "method": "POST",
+            "url": "{{KC_URL}}/realms/{{REALM}}/protocol/openid-connect/token",
+            "header": [{"key": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "grant_type", "value": "urn:ietf:params:oauth:grant-type:token-exchange"}
+              ]
+            }
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Token exchange returns 400 (disabled)', function() {",
+            "  pm.response.to.have.status(400);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Required Actions — check MFA status",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/authentication/required-actions",
+            "header": [{"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('CONFIGURE_TOTP action exists', function() {",
+            "  var actions = pm.response.json().map(a => a.alias);",
+            "  pm.expect(actions).to.include('CONFIGURE_TOTP');",
+            "});"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "3. Configure Gaps",
+      "item": [
+        {
+          "name": "PKCE — Bind fapi-1-baseline policy",
+          "request": {
+            "method": "PUT",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/client-policies/policies",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"policies\":[{\"name\":\"pkce-enforcement\",\"enabled\":true,\"conditions\":[{\"condition\":\"any-client\",\"configuration\":{}}],\"profiles\":[\"fapi-1-baseline\"]}]}"
+            }
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('PKCE policy created (200 or 204)', function() {",
+            "  pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "MFA — Enable CONFIGURE_TOTP as default",
+          "request": {
+            "method": "PUT",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/authentication/required-actions/CONFIGURE_TOTP",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"alias\":\"CONFIGURE_TOTP\",\"name\":\"Configure OTP\",\"providerId\":\"CONFIGURE_TOTP\",\"enabled\":true,\"defaultAction\":true,\"priority\":10}"
+            }
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('TOTP required action updated (204)', function() {",
+            "  pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "UserProfile — Add tenant_id + roles",
+          "request": {
+            "method": "PUT",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/users/profile",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{USER_PROFILE_BODY}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Fetch current profile, add custom attributes",
+                  "const url = pm.collectionVariables.get('KC_URL') + '/admin/realms/' + pm.collectionVariables.get('REALM') + '/users/profile';",
+                  "pm.sendRequest({",
+                  "  url: url,",
+                  "  method: 'GET',",
+                  "  header: {'Authorization': 'Bearer ' + pm.collectionVariables.get('ADMIN_TOKEN')}",
+                  "}, function(err, res) {",
+                  "  var profile = res.json();",
+                  "  var names = profile.attributes.map(a => a.name);",
+                  "  if (!names.includes('tenant_id')) {",
+                  "    profile.attributes.push({name:'tenant_id',displayName:'Tenant ID',permissions:{view:['admin'],edit:['admin']},validations:{length:{max:255}}});",
+                  "  }",
+                  "  if (!names.includes('roles')) {",
+                  "    profile.attributes.push({name:'roles',displayName:'Custom Roles',multivalued:true,permissions:{view:['admin'],edit:['admin']},validations:{length:{max:255}}});",
+                  "  }",
+                  "  pm.collectionVariables.set('USER_PROFILE_BODY', JSON.stringify(profile));",
+                  "});"
+                ]
+              }
+            },
+            {"listen": "test", "script": {"exec": [
+              "pm.test('UserProfile updated (200)', function() {",
+              "  pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+              "});"
+            ]}}
+          ]
+        },
+        {
+          "name": "Realm Role Mapper — realm_access in tokens",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/clients?briefRepresentation=false",
+            "header": [{"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "// Check if fluid-bootstrap has realm roles mapper",
+            "var clients = pm.response.json();",
+            "var bootstrap = clients.find(c => c.clientId === 'fluid-bootstrap');",
+            "if (bootstrap) {",
+            "  var mappers = bootstrap.protocolMappers || [];",
+            "  var hasRoles = mappers.some(m => m.name === 'realm roles');",
+            "  pm.test('fluid-bootstrap has realm roles mapper', function() {",
+            "    pm.expect(hasRoles).to.be.true;",
+            "  });",
+            "}"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "4. Acceptance Tests",
+      "item": [
+        {
+          "name": "AC#1 — Get Bootstrap Token (JWT with roles)",
+          "request": {
+            "method": "POST",
+            "url": "{{KC_URL}}/realms/{{REALM}}/protocol/openid-connect/token",
+            "header": [{"key": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "client_id", "value": "fluid-bootstrap"},
+                {"key": "client_secret", "value": "{{BOOTSTRAP_SECRET}}"},
+                {"key": "grant_type", "value": "client_credentials"}
+              ]
+            }
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Token issued (200)', function() { pm.response.to.have.status(200); });",
+            "pm.test('Token has realm_access.roles', function() {",
+            "  var token = pm.response.json().access_token;",
+            "  var payload = JSON.parse(atob(token.split('.')[1]));",
+            "  pm.expect(payload).to.have.nested.property('realm_access.roles');",
+            "  pm.expect(payload.realm_access.roles).to.include('gateway-admin');",
+            "});",
+            "pm.test('Token has aud=fluid-gateway', function() {",
+            "  var token = pm.response.json().access_token;",
+            "  var payload = JSON.parse(atob(token.split('.')[1]));",
+            "  pm.expect(payload.aud).to.include('fluid-gateway');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "AC#21 — Token exchange disabled",
+          "request": {
+            "method": "POST",
+            "url": "{{KC_URL}}/realms/{{REALM}}/protocol/openid-connect/token",
+            "header": [{"key": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "grant_type", "value": "urn:ietf:params:oauth:grant-type:token-exchange"}
+              ]
+            }
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Token exchange rejected (400)', function() {",
+            "  pm.response.to.have.status(400);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "AC#24 — MFA enabled (CONFIGURE_TOTP is default)",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/admin/realms/{{REALM}}/authentication/required-actions/CONFIGURE_TOTP",
+            "header": [{"key": "Authorization", "value": "Bearer {{ADMIN_TOKEN}}"}]
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('TOTP is enabled', function() {",
+            "  pm.expect(pm.response.json().enabled).to.be.true;",
+            "});",
+            "pm.test('TOTP is default action', function() {",
+            "  pm.expect(pm.response.json().defaultAction).to.be.true;",
+            "});"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "5. Browser Flow",
+      "item": [
+        {
+          "name": "Keycloak Login Page — renders",
+          "request": {
+            "method": "GET",
+            "url": "{{KC_URL}}/realms/{{REALM}}/account/"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('Login page returns 200', function() {",
+            "  pm.response.to.have.status(200);",
+            "});"
+          ]}}]
+        }
+      ]
+    }
+  ]
+}

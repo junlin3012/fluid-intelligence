@@ -1,0 +1,24 @@
+# Apollo sidecar — .dockerignore
+# This directory contains only the Dockerfile and this file.
+# Nothing else should be sent to the build daemon from this context.
+
+# Editor and OS artifacts
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Documentation
+*.md
+!README.md
+
+# Git metadata
+.git/
+.gitignore
+
+# Local overrides
+*.local
+.env
+.env.*
