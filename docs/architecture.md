@@ -72,6 +72,8 @@ User (browser)
 - **Identity providers**: Google OAuth + Microsoft Entra ID (configured in Keycloak Admin UI)
 - **Role mapping**: `SSO_KEYCLOAK_MAP_REALM_ROLES=true` — Keycloak realm roles → ContextForge RBAC
 - **User auto-creation**: `SSO_AUTO_CREATE_USERS=true` — first SSO login creates ContextForge user
+- **Trusted domains**: `SSO_TRUSTED_DOMAINS=["junlinleather.com"]` — auto-promotes matching domain users
+- **Fallback auth**: `SSO_PRESERVE_ADMIN_AUTH=true` — keeps email/password login during dev
 
 ### What Keycloak does NOT do
 
