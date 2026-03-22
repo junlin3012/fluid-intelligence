@@ -1,121 +1,64 @@
 # Fluid Intelligence
 
-A universal MCP gateway that gives AI clients (Claude, Codex, Cursor) a single intelligent endpoint to access any combination of APIs — GraphQL, REST, SOAP, MCP servers, databases — with per-user identity, role-based access, config-driven backends, and full audit trails.
+A universal MCP gateway that gives AI clients (Claude, Codex, Cursor) a single intelligent endpoint to access any combination of APIs — with per-user identity, role-based access, config-driven backends, and full audit trails.
 
 Shopify is the first vertical. It is not the last.
 
 ## Architecture
 
+5 Cloud Run services, zero custom application code:
+
 ```
-Client (Claude Code / Claude.ai / Cursor)
-  │
-  ▼
-┌─────────────────────────────────────────────────┐
-│  Cloud Run Container (:8080)                     │
-│                                                  │
-│  mcp-auth-proxy (Go)           :8080             │
-│  ├── OAuth 2.1 + Google login                    │
-│  ├── Per-user allowlists                         │
-│  └── Proxies to ContextForge                     │
-│                                                  │
-│  IBM ContextForge (Python)     :4444             │
-│  ├── MCP gateway core                            │
-│  ├── Tool aggregation + RBAC                     │
-│  └── PostgreSQL-backed state                     │
-│                                                  │
-│  Apollo MCP Server (Rust)      :8000             │
-│  └── Shopify GraphQL operations                  │
-│                                                  │
-│  dev-mcp bridge (Node.js)      :8003             │
-│  └── Shopify docs + schema introspection         │
-│                                                  │
-│  google-sheets bridge (Python) :8004             │
-│  └── Google Sheets via service account           │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Cloud Run                                               │
+│                                                          │
+│  contextforge (:8080)  ◄──── keycloak (:8080)            │
+│  IBM ContextForge           Keycloak 26.1.4              │
+│  MCP gateway + admin UI     Google + Microsoft SSO       │
+│       │                                                  │
+│       ├── apollo (:8000)    Shopify GraphQL execution     │
+│       ├── devmcp (:8003)    Shopify docs + learning      │
+│       └── sheets (:8004)    Google Sheets access          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+         │
+    Cloud SQL PostgreSQL (shared by contextforge + keycloak)
 ```
 
-**Traffic flow**: `Client → :8080 (auth-proxy) → :4444 (ContextForge) → backends`
+**Auth**: Keycloak SSO (Google + Microsoft identity providers) → ContextForge RBAC
+**Transport**: Streamable HTTP (Apollo), SSE (devmcp, sheets)
+**Custom code**: None — Dockerfiles + config files only
 
 ## Project Structure
 
 ```
-├── deploy/          Infrastructure (Dockerfile, Cloud Build configs)
-├── scripts/         Runtime scripts (entrypoint, bootstrap)
-├── config/          Service configuration (MCP config)
-├── graphql/         Shopify GraphQL operations
-├── docs/            Architecture, runbook, research, specs
-└── CLAUDE.md        Agent instructions
+├── services/                 One folder per Cloud Run service
+│   ├── contextforge/           Stock image, DB init only
+│   ├── keycloak/               Custom Dockerfile (realm import)
+│   ├── apollo/                 Custom Dockerfile (Rust build)
+│   ├── devmcp/                 Custom Dockerfile (translate bridge)
+│   └── sheets/                 Custom Dockerfile (translate bridge)
+├── docs/                     Documentation
+│   ├── architecture.md         System overview (start here)
+│   ├── config-reference.md     All env vars across services
+│   ├── known-gotchas.md        Distilled lessons from v3-v6
+│   └── contributing.md         How to add backends, deploy, troubleshoot
+├── docker-compose.yml        Local dev stack (all 6 services)
+└── CLAUDE.md                 Agent instructions
 ```
 
-## Quickstart
-
-### Prerequisites
-
-- Google Cloud SDK (`gcloud`) authenticated to `junlinleather-mcp`
-- Docker (for local builds)
-- `shopify-schema.graphql` — generate via Apollo introspection (not committed, 98K lines)
-
-### Deploy
-
-Push to `main` triggers Cloud Build automatically:
+## Quickstart (local)
 
 ```bash
-git push origin main
+cp .env.example .env
+# Fill in secrets (generate with: openssl rand -base64 32)
+docker compose up
+# Open http://localhost:8080 → log in with email/password
 ```
 
-Manual deploy:
+## Docs
 
-```bash
-gcloud builds submit --config deploy/cloudbuild.yaml --project junlinleather-mcp
-```
-
-Rebuild base image (only when Apollo version changes, ~20 min):
-
-```bash
-gcloud builds submit --config deploy/cloudbuild-base.yaml --project junlinleather-mcp --region asia-southeast1
-```
-
-### Verify
-
-```bash
-# Health check (returns 401 = auth proxy working)
-curl https://fluid-intelligence-1056128102929.asia-southeast1.run.app/health
-
-# Check Cloud Run status
-gcloud run services describe fluid-intelligence --region asia-southeast1 --project junlinleather-mcp
-```
-
-### Connect as MCP Client
-
-Add to `~/.claude.json` under `mcpServers`:
-
-```json
-{
-  "Fluid-Intelligence": {
-    "type": "http",
-    "url": "https://fluid-intelligence-1056128102929.asia-southeast1.run.app"
-  }
-}
-```
-
-## Stack
-
-| Component | Technology | Version | Purpose |
-|-----------|-----------|---------|---------|
-| Gateway | IBM ContextForge | 1.0.0-RC-2 | MCP aggregation, RBAC, audit |
-| Auth | mcp-auth-proxy | v2.5.4 | OAuth 2.1, Google login |
-| Shopify API | Apollo MCP Server | v1.9.0 | GraphQL operations |
-| Shopify Docs | @shopify/dev-mcp | v1.7.1 | Docs + schema |
-| Sheets | mcp-google-sheets | v0.6.0 | Google Sheets |
-| Database | Cloud SQL PostgreSQL | - | Persistent state |
-| Runtime | Google Cloud Run | - | asia-southeast1 |
-
-## Configuration
-
-See [.env.example](.env.example) for all environment variables.
-See [docs/architecture.md](docs/architecture.md) for detailed system overview.
-See [docs/runbook.md](docs/runbook.md) for operations guide.
-
-## License
-
-Apache 2.0 — see [LICENSE](LICENSE).
+- **[Architecture](docs/architecture.md)** — how everything connects
+- **[Config Reference](docs/config-reference.md)** — every env var
+- **[Known Gotchas](docs/known-gotchas.md)** — things that will bite you
+- **[Contributing](docs/contributing.md)** — deploy, add backends, troubleshoot
