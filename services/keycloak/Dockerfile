@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # ============================================================
-# Keycloak 26.1.4 — Optimized build for Fluid Intelligence v4
+# Keycloak 26.1.4 — Optimized build for Fluid Intelligence v6
 # ============================================================
 # Security posture:
 #   - Dangerous features disabled at build time (token-exchange,

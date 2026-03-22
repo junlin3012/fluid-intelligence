@@ -122,16 +122,19 @@ Run this protocol after any significant work:
 
 ```
 docs/agent-behavior/
-├── introspect.md          ← THIS FILE. Traps, checklists, protocols. Update when process changes.
-├── failure-log.md         ← Detailed failure records. What went wrong and why.
-├── insights.md            ← What worked well. Patterns to reuse. User preferences confirmed.
-└── patterns.md            ← Proven implementation patterns for this specific codebase.
+├── introspect.md          ← THIS FILE. Traps, checklists, protocols.
+├── failure-log.md         ← Distilled rules from past failures.
+└── insights.md            ← Distilled patterns from successes.
 ```
 
-- **introspect.md** (this file): The thinking protocol itself. Update when you discover new traps, refine checklists, or realize a section is wrong.
-- **failure-log.md**: Detailed records of failures with root cause analysis. Moved out of this file to keep introspect.md focused on the protocol.
-- **insights.md**: Things that worked. Patterns the user liked. Decisions that proved correct. Future agents should read this to learn from successes, not just failures.
-- **patterns.md**: Codebase-specific patterns — how this project structures things, naming conventions, deployment patterns, testing approaches.
+Related docs (outside agent-behavior/):
+- `docs/architecture.md` — system topology, auth flow, service details
+- `docs/known-gotchas.md` — things that will bite you (distilled from failure-log)
+- `docs/config-reference.md` — every env var across all services
+
+- **introspect.md** (this file): The thinking protocol itself. Update when you discover new traps.
+- **failure-log.md**: Distilled rules from failures. One line per lesson, not narratives.
+- **insights.md**: Distilled patterns from successes. What worked, as reusable rules.
 
 ---
 

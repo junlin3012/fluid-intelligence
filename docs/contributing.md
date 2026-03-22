@@ -157,3 +157,18 @@ Usually database connection pool exhaustion. Check:
 
 1. Generate new token in Shopify Partners dashboard
 2. Update Apollo: `gcloud run services update apollo --update-env-vars="SHOPIFY_ACCESS_TOKEN=<new>"`
+
+---
+
+## Run Tests
+
+```bash
+# From repo root
+pytest -v
+
+# Or specifically
+pytest services/keycloak/tests/ -v
+```
+
+Tests validate:
+- `services/keycloak/tests/test_realm_json.py` — realm JSON structure, client config, roles, scopes

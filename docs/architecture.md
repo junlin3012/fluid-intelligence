@@ -183,7 +183,7 @@ Backends are registered in the ContextForge **Admin UI** (not via API or scripts
 | `services/contextforge/db/init.sql` | ~20 | Creates contextforge DB + least-privilege user |
 | `services/keycloak/db/init.sql` | ~20 | Creates keycloak DB + least-privilege user |
 | `services/db-init.sh` | ~15 | Wrapper script for docker-compose postgres init |
-| `docker-compose.yml` | ~210 | Local dev stack (all 6 services) |
+| `docker-compose.yml` | ~200 | Local dev stack (all 6 services) |
 | `services/keycloak/tests/test_realm_json.py` | ~250 | Validates realm JSON structure |
 
 **If you're looking for "the code" — there is none.** The system is composed entirely of:

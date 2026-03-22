@@ -51,7 +51,7 @@ The gateway has the most configuration. Stock image, all behavior controlled via
 | `SSO_KEYCLOAK_BASE_URL` | `https://keycloak-apanptkfaq-as.a.run.app` | env | Keycloak server URL |
 | `SSO_KEYCLOAK_REALM` | `fluid` | env | Keycloak realm name |
 | `SSO_KEYCLOAK_CLIENT_ID` | `fluid-gateway-sso` | env | Keycloak client ID |
-| `SSO_KEYCLOAK_CLIENT_SECRET` | `TyDjtj75FH...` | env | Client secret. **Should move to Secret Manager.** |
+| `SSO_KEYCLOAK_CLIENT_SECRET` | `<redacted>` | env | Client secret. **Should move to Secret Manager.** |
 | `SSO_KEYCLOAK_MAP_REALM_ROLES` | `true` | env | Map Keycloak realm roles to ContextForge RBAC |
 | `SSO_AUTO_CREATE_USERS` | `true` | env | Auto-create ContextForge user on first SSO login |
 | `SSO_TRUSTED_DOMAINS` | `["junlinleather.com"]` | env | Auto-promote users from these domains |
