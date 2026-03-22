@@ -1,37 +1,199 @@
-# Local development — run gateway with local PostgreSQL (no GCP required)
-# Usage: cp .env.example .env → fill values → docker compose up
+# docker-compose.yml — Fluid Intelligence v6 local development stack
+#
+# 6 services: PostgreSQL + Keycloak + ContextForge + Apollo + devmcp + sheets
+#
+# Usage:
+#   cp .env.example .env  # Fill required secrets
+#   docker compose up
+#
+# Required .env variables:
+#   POSTGRES_PASS             — PostgreSQL superuser
+#   CONTEXTFORGE_DB_PASS      — contextforge_user DB credential
+#   KEYCLOAK_DB_PASS          — keycloak_user DB credential
+#   KC_ADMIN_PASS             — Keycloak admin console
+#   SSO_CLIENT_SECRET         — fluid-gateway-sso client secret
+#   AUTH_ENCRYPTION_SECRET    — ContextForge DB encryption key
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
-  gateway:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
-    env_file:
-      - config/defaults.env
-      - .env
+
+  # ── 1. PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
     environment:
-      # Local PostgreSQL (overrides CLOUDSQL_INSTANCE requirement)
-      DATABASE_URL: postgresql://contextforge:localdev@postgres:5432/contextforge
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASS:?POSTGRES_PASS is required}
+      CONTEXTFORGE_DB_PASS: ${CONTEXTFORGE_DB_PASS:?required}
+      KEYCLOAK_DB_PASS: ${KEYCLOAK_DB_PASS:?required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./services/db-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+      - ./services/contextforge/db/init.sql:/docker-entrypoint-initdb.d/sql/01-contextforge.sql:ro
+      - ./services/keycloak/db/init.sql:/docker-entrypoint-initdb.d/sql/02-keycloak.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # ── 2. Keycloak ────────────────────────────────────────────────────
+  keycloak:
+    build:
+      context: ./services/keycloak
+      dockerfile: Dockerfile
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak_user
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASS:?required}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASS:?required}
+      KC_HOSTNAME: "http://localhost:8180"
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8080"
+      KC_DB_POOL_INITIAL_SIZE: "2"
+      KC_DB_POOL_MAX_SIZE: "5"
+    ports:
+      - "8180:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/fluid HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && timeout 2 cat <&3 | grep -q fluid"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # ── 3. ContextForge ────────────────────────────────────────────────
+  # Stock image + env vars ONLY. SSO handles all auth — zero custom code.
+  contextforge:
+    image: ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      MCG_HOST: "0.0.0.0"
+      MCG_PORT: "8080"
+      WORKERS: "2"
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
+      DATABASE_URL: "postgresql+psycopg://contextforge_user:${CONTEXTFORGE_DB_PASS:?required}@postgres:5432/contextforge"
+      SSO_ENABLED: "true"
+      SSO_KEYCLOAK_ENABLED: "true"
+      SSO_KEYCLOAK_BASE_URL: "http://keycloak:8080"
+      SSO_KEYCLOAK_REALM: "fluid"
+      SSO_KEYCLOAK_CLIENT_ID: "fluid-gateway-sso"
+      SSO_KEYCLOAK_CLIENT_SECRET: "${SSO_CLIENT_SECRET:?required}"
+      SSO_KEYCLOAK_MAP_REALM_ROLES: "true"
+      SSO_AUTO_CREATE_USERS: "true"
+      AUTH_REQUIRED: "true"
+      MCP_CLIENT_AUTH_ENABLED: "true"
+      TRUST_PROXY_AUTH: "false"
+      TRUST_PROXY_AUTH_DANGEROUSLY: "false"
+      MCPGATEWAY_UI_ENABLED: "true"
+      MCPGATEWAY_ADMIN_API_ENABLED: "true"
+      ALLOWED_ORIGINS: "http://localhost:8080,http://localhost:8180"
+      SSRF_ALLOW_LOCALHOST: "true"
+      SSRF_ALLOW_PRIVATE_NETWORKS: "true"
+      AUTH_ENCRYPTION_SECRET: "${AUTH_ENCRYPTION_SECRET:?required}"
+      PLATFORM_ADMIN_EMAIL: "${PLATFORM_ADMIN_EMAIL:-admin@example.com}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: contextforge
-      POSTGRES_PASSWORD: localdev
-      POSTGRES_DB: contextforge
-    ports:
-      - "5432:5432"
+      keycloak:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U contextforge"]
-      interval: 2s
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health > /dev/null || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 10
-    volumes:
-      - pgdata:/var/lib/postgresql/data
+      start_period: 15s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # ── 4. Apollo MCP Server ───────────────────────────────────────────
+  apollo:
+    build:
+      context: ./services/apollo
+      dockerfile: Dockerfile
+    environment:
+      SHOPIFY_STORE: "${SHOPIFY_STORE:-placeholder.myshopify.com}"
+      SHOPIFY_API_VERSION: "${SHOPIFY_API_VERSION:-2026-01}"
+      SHOPIFY_ACCESS_TOKEN: "${SHOPIFY_ACCESS_TOKEN:-placeholder}"
+      APOLLO_GRAPH_REF: "${APOLLO_GRAPH_REF:-shopify-fluid-intelligence@current}"
+      APOLLO_KEY: "${APOLLO_KEY}"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # ── 5. dev-mcp ─────────────────────────────────────────────────────
+  devmcp:
+    build:
+      context: ./services/devmcp
+      dockerfile: Dockerfile
+    environment:
+      MCG_PORT: "8003"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8003 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # ── 6. Google Sheets ───────────────────────────────────────────────
+  sheets:
+    build:
+      context: ./services/sheets
+      dockerfile: Dockerfile
+    environment:
+      MCG_PORT: "8004"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8004 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # Backend registration done via ContextForge Admin UI
+  # (UI-first configuration rule: don't API-hack what the UI manages)
 
 volumes:
   pgdata:
+
+networks:
+  fluid-net:
+    driver: bridge
