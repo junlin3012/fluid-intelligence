@@ -3,6 +3,7 @@ from typing import Dict
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse, HTMLResponse
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 
 from app.config import settings
 from app.encryption import encrypt_token
@@ -37,20 +38,41 @@ async def callback(provider: str, code: str, state: str, shop: str):
     key = settings.TOKEN_ENCRYPTION_KEY
     now = datetime.now(timezone.utc)
 
-    cred = OAuthCredential(
-        provider=provider,
-        account_id=shop,
-        encrypted_access_token=encrypt_token(tokens["access_token"], key),
-        encrypted_refresh_token=encrypt_token(tokens["refresh_token"], key) if tokens.get("refresh_token") else None,
-        token_expires_at=now + timedelta(seconds=tokens.get("expires_in", 3600)),
-        refresh_token_expires_at=now + timedelta(seconds=tokens["refresh_token_expires_in"]) if tokens.get("refresh_token_expires_in") else None,
-        scopes=tokens.get("scope"),
-        last_refreshed_at=now,
-    )
-
     async with async_session() as session:
         async with session.begin():
-            session.add(cred)
+            # Upsert: update existing credential or insert new one
+            stmt = select(OAuthCredential).where(
+                OAuthCredential.provider == provider,
+                OAuthCredential.account_id == shop,
+            )
+            result = await session.execute(stmt)
+            cred = result.scalar_one_or_none()
+
+            if cred:
+                # Update existing
+                cred.encrypted_access_token = encrypt_token(tokens["access_token"], key)
+                cred.encrypted_refresh_token = encrypt_token(tokens["refresh_token"], key) if tokens.get("refresh_token") else None
+                cred.token_expires_at = now + timedelta(seconds=tokens.get("expires_in", 3600))
+                cred.refresh_token_expires_at = now + timedelta(seconds=tokens["refresh_token_expires_in"]) if tokens.get("refresh_token_expires_in") else None
+                cred.scopes = tokens.get("scope")
+                cred.last_refreshed_at = now
+                cred.status = "active"
+                cred.failure_count = 0
+                cred.last_error = None
+                cred.updated_at = now
+            else:
+                # Insert new
+                cred = OAuthCredential(
+                    provider=provider,
+                    account_id=shop,
+                    encrypted_access_token=encrypt_token(tokens["access_token"], key),
+                    encrypted_refresh_token=encrypt_token(tokens["refresh_token"], key) if tokens.get("refresh_token") else None,
+                    token_expires_at=now + timedelta(seconds=tokens.get("expires_in", 3600)),
+                    refresh_token_expires_at=now + timedelta(seconds=tokens["refresh_token_expires_in"]) if tokens.get("refresh_token_expires_in") else None,
+                    scopes=tokens.get("scope"),
+                    last_refreshed_at=now,
+                )
+                session.add(cred)
 
     expires_min = tokens.get("expires_in", 3600) // 60
     refresh_days = tokens.get("refresh_token_expires_in", 0) // 86400
