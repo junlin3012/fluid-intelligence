@@ -1,0 +1,42 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: apollo
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/container-dependencies: '{"apollo": ["credential-proxy"]}'
+    spec:
+      containers:
+        - name: apollo
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/apollo:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: "1"
+        - name: credential-proxy
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FORWARDED_ALLOW_IPS
+              value: "*"
+            - name: TOKEN_SERVICE_URL
+              value: "https://token-service-apanptkfaq-as.a.run.app"
+            - name: SHOPIFY_HOST
+              value: "https://junlinleather-5148.myshopify.com"
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 2
