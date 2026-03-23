@@ -2,15 +2,15 @@
 -- Runs as postgres superuser during docker-entrypoint-initdb
 
 -- Create token_service user (reuses contextforge database)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'token_service_user') THEN
-        EXECUTE format('CREATE ROLE token_service_user LOGIN PASSWORD %L', :'TOKEN_SERVICE_DB_PASS');
-    END IF;
-END
-$$;
+-- Uses same pattern as contextforge/keycloak init scripts — plain CREATE USER
+-- with psql variable interpolation (no DO $$ block needed).
+CREATE USER token_service_user WITH
+    PASSWORD :'TOKEN_SERVICE_DB_PASS'
+    CONNECTION LIMIT 10
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE;
 
--- Create table in contextforge database
 \connect contextforge
 
 CREATE TABLE IF NOT EXISTS oauth_credentials (
