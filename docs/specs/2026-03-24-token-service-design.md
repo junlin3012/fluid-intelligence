@@ -1,9 +1,10 @@
 # Token Service — Enterprise Credential Lifecycle Manager
 
 **Date**: 2026-03-24
-**Status**: Approved (design review complete)
+**Status**: Draft (pending user review)
 **Author**: Claude + Jun Lin
 **Services affected**: New `token-service`, modified `apollo`
+**Review**: Spec review round 1 — 4 critical, 6 major, 6 minor issues found and fixed
 
 ## 1. Problem Statement
 
@@ -72,10 +73,25 @@ As of April 1, 2026, all new Shopify public apps are required to use expiring to
 ### 3.2 New Service: token-service
 
 - **Runtime**: Python 3.12, FastAPI, uvicorn
-- **Cloud Run config**: min-instances=1, max-instances=1, 256MB RAM, 1 vCPU
+- **Cloud Run config**: min-instances=1, max-instances=1, 256MB RAM, 1 vCPU, `--cpu-always-allocated` (required for background refresh loop — without this, Cloud Run freezes CPU between requests, silently killing the timer)
 - **Port**: 8000
 - **Database**: Existing Cloud SQL PostgreSQL instance (`contextforge`)
+- **DB pool**: `DB_POOL_SIZE=2`, `DB_MAX_OVERFLOW=2` (token-service needs at most 2 concurrent connections)
 - **Static secrets** (from Secret Manager): `shopify-client-secret`, `token-encryption-key`
+- **Env vars**: `FORWARDED_ALLOW_IPS=*` (required for uvicorn behind Cloud Run's HTTPS proxy)
+
+### 3.2.1 Database Connection Budget
+
+The existing Cloud SQL instance (`db-f1-micro`) has `max_connections=50`. Budget after token-service:
+
+| Service | Pool size | Max overflow | Worst case |
+|---|---|---|---|
+| ContextForge (2 workers) | 5 x 2 = 10 | 5 x 2 = 10 | 20 |
+| Keycloak | 2 | 3 | 5 |
+| **token-service** | **2** | **2** | **4** |
+| **Total** | | | **29 of 50** |
+
+Headroom: 21 connections for future services or connection spikes.
 
 ### 3.3 Modified Service: apollo
 
@@ -190,7 +206,7 @@ GET /connect/{provider}
 
 ```
 → 302 Redirect to:
-https://junlinleather-5148.myshopify.com/admin/oauth/authorize?
+https://{shop_domain}/admin/oauth/authorize?
   client_id=f597c0aaa02fac7278a54c617d7b344d&
   scope=read_products,write_products,read_customers,write_customers,
         read_orders,write_orders,read_draft_orders,write_draft_orders,
@@ -200,6 +216,19 @@ https://junlinleather-5148.myshopify.com/admin/oauth/authorize?
   state={signed_nonce}&
   expiring=1
 ```
+
+**Note**: `shop_domain` is `junlinleather-5148.myshopify.com` for v1. The `/connect` endpoint should accept `?shop=domain` as a query parameter for future multi-shop support. The `expiring=1` parameter opts into expiring offline tokens — after April 1, 2026 this becomes the default for all new public apps.
+
+### 5.2.1 State Nonce Specification (CSRF Protection)
+
+The `state` parameter prevents CSRF attacks on the OAuth callback:
+
+- **Algorithm**: HMAC-SHA256
+- **Key**: Derived from `token-encryption-key` (from Secret Manager) — no separate key needed
+- **Payload**: `{provider}:{timestamp}:{random_16_bytes}`
+- **Format**: `base64url(payload):base64url(hmac_signature)`
+- **TTL**: 10 minutes (reject if `timestamp` is older)
+- **Verification**: On `/callback`, decode state, verify HMAC, check timestamp < 10 min ago, check provider matches URL
 
 ```
 GET /callback/{provider}
@@ -253,19 +282,19 @@ GET /status
 GET /health
 ```
 
-**Access**: Public.
+**Access**: Public. Used by Cloud Run health checks. Minimal — no provider details exposed.
 
 **Response** (200):
 ```json
 {
-  "status": "healthy",
-  "providers": {
-    "shopify": {
-      "status": "active",
-      "token_fresh": true,
-      "next_refresh_in_seconds": 1200
-    }
-  }
+  "status": "healthy"
+}
+```
+
+**Response** (503 — any provider in error/requires_reauth state):
+```json
+{
+  "status": "degraded"
 }
 ```
 
@@ -273,7 +302,7 @@ GET /health
 GET /metrics
 ```
 
-**Access**: Public. Prometheus format.
+**Access**: **IAM-protected** (admin service account only). Exposes operational intelligence (provider names, error types, token TTL) that should not be public.
 
 ```
 # HELP token_refresh_total Successful token refreshes
@@ -317,10 +346,29 @@ Runs every 45 minutes inside the token-service process:
    c. Re-read row (another process may have refreshed since step 1)
    d. If still expiring:
       i.   POST https://{account_id}/admin/oauth/access_token
-           body: client_id, client_secret, grant_type=refresh_token, refresh_token
+           Content-Type: application/x-www-form-urlencoded
+           body: client_id={client_id}&client_secret={client_secret}&grant_type=refresh_token&refresh_token={refresh_token}
+
+           Verified against: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/offline-access-tokens
+
+           Expected 200 response:
+           {
+             "access_token": "shpat_new...",
+             "expires_in": 3600,
+             "refresh_token": "shprt_new...",
+             "refresh_token_expires_in": 7776000,
+             "scope": "read_products,write_products,..."
+           }
+
+           CRITICAL: Both tokens rotate on every refresh. The old refresh_token is
+           invalidated immediately after single use. This is why the single-flight
+           lock (section 6.4) is essential.
+
       ii.  On 200: encrypt new tokens, UPDATE row (access_token, refresh_token,
-           token_expires_at, refresh_token_expires_at, last_refreshed_at, failure_count=0)
-      iii. On 400 invalid_grant: UPDATE status='requires_reauth', fire CRITICAL alert
+           token_expires_at = now() + expires_in,
+           refresh_token_expires_at = now() + refresh_token_expires_in,
+           last_refreshed_at = now(), failure_count = 0)
+      iii. On 400 {"error": "invalid_grant"}: UPDATE status='requires_reauth', fire CRITICAL alert
       iv.  On other error: INCREMENT failure_count, log error, schedule retry
    e. COMMIT (releases advisory lock)
 ```
@@ -396,51 +444,90 @@ A lightweight HTTP proxy that runs as a sidecar container in Apollo's Cloud Run 
 ### 7.2 Implementation (~60 lines)
 
 ```python
+import os
 import time
 import httpx
+import google.auth.transport.requests
+import google.oauth2.id_token
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 
-app = FastAPI()
-TOKEN_SERVICE_URL = "http://token-service:8000"  # Cloud Run service-to-service
-SHOPIFY_HOST = "https://junlinleather-5148.myshopify.com"
+# Cloud Run: use actual service URL + IAM auth
+# Local dev (docker-compose): use container name, no IAM
+TOKEN_SERVICE_URL = os.environ.get(
+    "TOKEN_SERVICE_URL",
+    "https://token-service-apanptkfaq-as.a.run.app"
+)
+SHOPIFY_HOST = os.environ.get(
+    "SHOPIFY_HOST",
+    "https://junlinleather-5148.myshopify.com"
+)
+IS_CLOUD_RUN = os.environ.get("K_SERVICE") is not None  # Cloud Run sets K_SERVICE
+
+# Connection-pooled HTTP clients (created once, reused for all requests)
+token_client: httpx.AsyncClient = None
+shopify_client: httpx.AsyncClient = None
+
+@asynccontextmanager
+async def lifespan(app):
+    global token_client, shopify_client
+    token_client = httpx.AsyncClient(base_url=TOKEN_SERVICE_URL, timeout=10)
+    shopify_client = httpx.AsyncClient(base_url=SHOPIFY_HOST, timeout=30)
+    yield
+    await token_client.aclose()
+    await shopify_client.aclose()
+
+app = FastAPI(lifespan=lifespan)
 
 # In-memory token cache (30s TTL)
 _cached_token: str | None = None
 _cached_at: float = 0
 
+def _get_iam_token() -> str:
+    """Get an ID token for service-to-service auth on Cloud Run."""
+    auth_req = google.auth.transport.requests.Request()
+    return google.oauth2.id_token.fetch_id_token(auth_req, TOKEN_SERVICE_URL)
+
 async def get_token() -> str:
     global _cached_token, _cached_at
     if _cached_token and time.time() - _cached_at < 30:
         return _cached_token
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{TOKEN_SERVICE_URL}/token/shopify")
-        resp.raise_for_status()
-        _cached_token = resp.json()["access_token"]
-        _cached_at = time.time()
-        return _cached_token
+
+    headers = {}
+    if IS_CLOUD_RUN:
+        headers["Authorization"] = f"Bearer {_get_iam_token()}"
+
+    resp = await token_client.get("/token/shopify", headers=headers)
+    resp.raise_for_status()
+    _cached_token = resp.json()["access_token"]
+    _cached_at = time.time()
+    return _cached_token
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy(request: Request, path: str):
     token = await get_token()
-    headers = dict(request.headers)
-    headers["X-Shopify-Access-Token"] = token
-    headers["host"] = "junlinleather-5148.myshopify.com"
-    headers.pop("transfer-encoding", None)
+    headers = {
+        "X-Shopify-Access-Token": token,
+        "Content-Type": request.headers.get("Content-Type", "application/json"),
+    }
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.request(
-            method=request.method,
-            url=f"{SHOPIFY_HOST}/{path}",
-            headers=headers,
-            content=await request.body(),
-            timeout=30,
-        )
+    resp = await shopify_client.request(
+        method=request.method,
+        url=f"/{path}",
+        headers=headers,
+        content=await request.body(),
+    )
     return Response(
         content=resp.content,
         status_code=resp.status_code,
         headers=dict(resp.headers),
     )
 ```
+
+**Key implementation details:**
+- **Connection pooling**: `httpx.AsyncClient` instances are created once via FastAPI lifespan, reused across all requests. No per-request TCP connection overhead.
+- **IAM authentication**: On Cloud Run, the proxy fetches an ID token from the metadata server and sends it as a Bearer token to token-service. Locally (docker-compose), IAM is skipped.
+- **Environment detection**: `K_SERVICE` env var is set automatically by Cloud Run. Used to toggle IAM auth on/off.
 
 ### 7.3 Container Config
 
@@ -452,22 +539,119 @@ COPY proxy.py .
 CMD ["uvicorn", "proxy:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-Cloud Run multi-container YAML (added to Apollo's service):
+### 7.3.1 Cloud Run Multi-Container Deployment
+
+Deploy via `gcloud` CLI (preferred over raw YAML for clarity):
+
+```bash
+gcloud run services replace apollo-service.yaml --region=asia-southeast1
+```
+
+Full `apollo-service.yaml`:
 
 ```yaml
-containers:
-  - name: apollo
-    image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/apollo:latest
-    ports:
-      - containerPort: 8000
-  - name: credential-proxy
-    image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy:latest
-    ports:
-      - containerPort: 8080
-    env:
-      - name: FORWARDED_ALLOW_IPS
-        value: "*"
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: apollo
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        # credential-proxy must start before apollo sends its first request
+        run.googleapis.com/container-dependencies: '{"apollo": ["credential-proxy"]}'
+    spec:
+      containers:
+        # Ingress container — receives external MCP traffic
+        - name: apollo
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/apollo:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: "1"
+
+        # Sidecar — injects Shopify credentials into outbound requests
+        - name: credential-proxy
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FORWARDED_ALLOW_IPS
+              value: "*"
+            - name: TOKEN_SERVICE_URL
+              value: "https://token-service-apanptkfaq-as.a.run.app"
+            - name: SHOPIFY_HOST
+              value: "https://junlinleather-5148.myshopify.com"
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 2
 ```
+
+**Key annotations:**
+- `container-dependencies`: ensures credential-proxy is ready before Apollo starts sending requests
+- Apollo is the ingress container (has `ports` with `containerPort: 8000`)
+- credential-proxy gets minimal resources (128MB, 0.5 vCPU) — it's a lightweight proxy
+
+### 7.3.2 Local Development (docker-compose additions)
+
+Since docker-compose does not support multi-container pods, the credential-proxy runs as a separate service. Apollo talks to it via Docker networking.
+
+```yaml
+# Add to docker-compose.yml:
+
+  token-service:
+    build: ./services/token-service
+    ports:
+      - "8010:8000"
+    environment:
+      - DATABASE_URL=postgresql://contextforge:${DB_PASSWORD}@postgres:5432/contextforge
+      - DB_POOL_SIZE=2
+      - DB_MAX_OVERFLOW=2
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - SHOPIFY_CLIENT_ID=${SHOPIFY_CLIENT_ID}
+      - SHOPIFY_CLIENT_SECRET=${SHOPIFY_CLIENT_SECRET}
+      - FORWARDED_ALLOW_IPS=*
+    depends_on:
+      - postgres
+
+  credential-proxy:
+    build: ./services/credential-proxy
+    ports:
+      - "8011:8080"
+    environment:
+      - TOKEN_SERVICE_URL=http://token-service:8000
+      - SHOPIFY_HOST=https://junlinleather-5148.myshopify.com
+      - FORWARDED_ALLOW_IPS=*
+    depends_on:
+      - token-service
+
+  # Modify existing apollo service:
+  apollo:
+    # ... existing config ...
+    environment:
+      # REMOVE: SHOPIFY_ACCESS_TOKEN
+      # Apollo now talks to credential-proxy instead of Shopify directly
+      - APOLLO_ENDPOINT=http://credential-proxy:8080/admin/api/2026-01/graphql.json
+    depends_on:
+      - credential-proxy
+```
+
+**Local dev workflow:**
+1. `docker compose up` — all services start
+2. Open `http://localhost:8010/connect/shopify` — authorize once
+3. Apollo sends GraphQL to credential-proxy, which injects the token and forwards to Shopify
+4. Token refreshes automatically in the background
 
 ## 8. Monitoring & Alerts
 
@@ -515,7 +699,8 @@ containers:
 | `GET /token/{provider}` | `credential-proxy` service account only |
 | `GET /connect/*`, `GET /callback/*` | Temporarily public for bootstrap, then IAM-locked |
 | `POST /rotate/*`, `GET /status` | Admin service account only |
-| `GET /health`, `GET /metrics` | Public (no sensitive data) |
+| `GET /health` | Public (minimal response, no provider details) |
+| `GET /metrics` | Admin service account only (exposes operational intelligence) |
 
 ### 9.3 Logging Policy
 
@@ -558,7 +743,29 @@ Adding a new OAuth provider requires:
 
 No code changes to token-service core. No schema changes. One row in `oauth_credentials`, one sidecar per consumer.
 
-## 13. Enterprise Pattern References
+## 13. Rollback Plan
+
+If something goes wrong mid-deployment:
+
+| Failure | Rollback |
+|---|---|
+| token-service deploys but Apollo multi-container fails | Revert Apollo to single-container with `SHOPIFY_ACCESS_TOKEN` env var. Token-service can be deleted independently. |
+| credential-proxy can't reach token-service | Apollo returns 502s. Revert Apollo to single-container with static token. |
+| `oauth_credentials` table migration fails | Table is additive — does not affect existing services. Drop table and retry. |
+| Token refresh loop breaks after deployment | Manually set `SHOPIFY_ACCESS_TOKEN` env var on Apollo as a static fallback. Investigate token-service logs. |
+
+**The `oauth_credentials` table is purely additive.** No existing tables are modified. No existing services read from it. Rollback = revert Apollo's config and delete token-service.
+
+## 14. Documentation Updates Required
+
+This spec introduces the first application code in the Fluid Intelligence system. The following docs must be updated post-implementation:
+
+- **`docs/architecture.md`**: Remove "zero application code" claim. Add token-service and credential-proxy to the service inventory. Explain why application code is justified here (third-party credential lifecycle cannot be solved with config alone).
+- **`CLAUDE.md`**: Update "Configure, don't code" guidance to note the exception: token-service is application code because no existing component in the stack handles OAuth token lifecycle.
+- **`docs/config-reference.md`**: Add token-service env vars and credential-proxy env vars.
+- **`docs/known-gotchas.md`**: Add entry about Cloud SQL `max_connections` budget (now 29 of 50).
+
+## 15. Enterprise Pattern References
 
 | Pattern | Source | How we use it |
 |---|---|---|
