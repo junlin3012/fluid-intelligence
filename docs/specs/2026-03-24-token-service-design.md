@@ -479,6 +479,11 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 
+@app.get("/health")
+async def health():
+    """Health endpoint for Cloud Run startup probe."""
+    return {"status": "healthy"}
+
 # In-memory token cache (30s TTL)
 _cached_token: str | None = None
 _cached_at: float = 0
@@ -534,7 +539,7 @@ async def proxy(request: Request, path: str):
 ```dockerfile
 FROM python:3.12-slim
 WORKDIR /app
-RUN pip install fastapi uvicorn httpx
+RUN pip install fastapi uvicorn httpx google-auth
 COPY proxy.py .
 CMD ["uvicorn", "proxy:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
