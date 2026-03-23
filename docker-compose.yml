@@ -30,11 +30,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASS:?POSTGRES_PASS is required}
       CONTEXTFORGE_DB_PASS: ${CONTEXTFORGE_DB_PASS:?required}
       KEYCLOAK_DB_PASS: ${KEYCLOAK_DB_PASS:?required}
+      TOKEN_SERVICE_DB_PASS: ${TOKEN_SERVICE_DB_PASS:?required}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./services/db-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
       - ./services/contextforge/db/init.sql:/docker-entrypoint-initdb.d/sql/01-contextforge.sql:ro
       - ./services/keycloak/db/init.sql:/docker-entrypoint-initdb.d/sql/02-keycloak.sql:ro
+      - ./services/token-service/db/init.sql:/docker-entrypoint-initdb.d/sql/03-token-service.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
