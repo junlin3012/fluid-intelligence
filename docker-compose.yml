@@ -1,6 +1,6 @@
 # docker-compose.yml — Fluid Intelligence v6 local development stack
 #
-# 6 services: PostgreSQL + Keycloak + ContextForge + Apollo + devmcp + sheets
+# 8 services: PostgreSQL + Keycloak + ContextForge + Apollo + devmcp + sheets + token-service + credential-proxy
 #
 # Usage:
 #   cp .env.example .env  # Fill required secrets
@@ -146,11 +146,14 @@ services:
       context: ./services/apollo
       dockerfile: Dockerfile
     environment:
-      SHOPIFY_STORE: "${SHOPIFY_STORE:-placeholder.myshopify.com}"
       SHOPIFY_API_VERSION: "${SHOPIFY_API_VERSION:-2026-01}"
-      SHOPIFY_ACCESS_TOKEN: "${SHOPIFY_ACCESS_TOKEN:-placeholder}"
       APOLLO_GRAPH_REF: "${APOLLO_GRAPH_REF:-shopify-fluid-intelligence@current}"
       APOLLO_KEY: "${APOLLO_KEY}"
+    volumes:
+      - ./services/apollo/config-local.yaml:/app/config.yaml:ro
+    depends_on:
+      credential-proxy:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8000 || exit 1"]
       interval: 10s
@@ -191,6 +194,59 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # ── 7. Token Service ─────────────────────────────────────────────
+  token-service:
+    build:
+      context: ./services/token-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://token_service_user:${TOKEN_SERVICE_DB_PASS:?required}@postgres:5432/contextforge"
+      DB_POOL_SIZE: "2"
+      DB_MAX_OVERFLOW: "2"
+      TOKEN_ENCRYPTION_KEY: "${TOKEN_ENCRYPTION_KEY:?required}"
+      SHOPIFY_CLIENT_ID: "${SHOPIFY_CLIENT_ID}"
+      SHOPIFY_CLIENT_SECRET: "${SHOPIFY_CLIENT_SECRET}"
+      BASE_URL: "http://localhost:8010"
+      FORWARDED_ALLOW_IPS: "*"
+    ports:
+      - "8010:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - fluid-net
+    logging: *default-logging
+    restart: unless-stopped
+
+  # ── 8. Credential Proxy ──────────────────────────────────────────
+  credential-proxy:
+    build:
+      context: ./services/credential-proxy
+      dockerfile: Dockerfile
+    environment:
+      TOKEN_SERVICE_URL: "http://token-service:8000"
+      SHOPIFY_HOST: "https://${SHOPIFY_STORE:-junlinleather-5148.myshopify.com}"
+      FORWARDED_ALLOW_IPS: "*"
+    depends_on:
+      token-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
     networks:
       - fluid-net
     logging: *default-logging
