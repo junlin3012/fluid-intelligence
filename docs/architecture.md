@@ -1,13 +1,13 @@
 # Architecture
 
-> v6 — Last updated 2026-03-22.
+> v6.1 — Last updated 2026-03-24.
 > This is the single source of truth for how Fluid Intelligence works.
 
 ---
 
 ## System Topology
 
-5 Cloud Run services + 1 Cloud SQL PostgreSQL instance:
+7 Cloud Run services + 1 Cloud SQL PostgreSQL instance:
 
 ```
                         ┌─────────────────────────────┐
@@ -15,34 +15,49 @@
                         │   Instance: contextforge    │
                         │   IP: 34.124.134.166        │
                         │   max_connections: 50       │
+                        │   (budget: 29 used)         │
                         │                             │
                         │   ┌─────────┐ ┌──────────┐ │
                         │   │contextforge│ │keycloak │ │
                         │   │  DB      │ │  DB      │ │
                         │   └─────────┘ └──────────┘ │
-                        └──────┬──────────────┬───────┘
-                               │              │
-┌──────────────────────────────┼──────────────┼────────────────────┐
-│  Cloud Run Services          │              │                    │
-│                              │              │                    │
-│  ┌───────────────────────────┴──┐  ┌───────┴────────────────┐   │
-│  │ contextforge                 │  │ keycloak               │   │
-│  │ IBM ContextForge 1.0.0-RC-2 │  │ Keycloak 26.1.4        │   │
-│  │ MCP gateway + admin UI      │◄─┤ Identity broker         │   │
-│  │ :8080                       │  │ Google + Microsoft IdPs │   │
-│  └──────┬──────────┬───────────┘  │ :8080                   │   │
-│         │          │              └─────────────────────────┘   │
-│         │          │                                            │
-│  ┌──────┴───┐  ┌───┴──────┐  ┌──────────┐                     │
-│  │ apollo   │  │ devmcp   │  │ sheets   │                     │
-│  │ v1.10.0  │  │ translate│  │ translate│                     │
-│  │ GraphQL  │  │ bridge   │  │ bridge   │                     │
-│  │ :8000    │  │ :8003    │  │ :8004    │                     │
-│  └──────────┘  └──────────┘  └──────────┘                     │
-└───────────────────────────────────────────────────────────────┘
+                        │   + oauth_credentials table │
+                        └──────┬──────────┬──────┬────┘
+                               │          │      │
+┌──────────────────────────────┼──────────┼──────┼───────────────┐
+│  Cloud Run Services          │          │      │               │
+│                              │          │      │               │
+│  ┌───────────────────────────┴──┐  ┌────┴──────┴───────────┐  │
+│  │ contextforge                 │  │ keycloak              │  │
+│  │ IBM ContextForge 1.0.0-RC-2 │  │ Keycloak 26.1.4       │  │
+│  │ MCP gateway + admin UI      │◄─┤ Identity broker        │  │
+│  │ :8080                       │  │ Google + Microsoft IdPs│  │
+│  └──────┬──────────┬───────────┘  │ :8080                  │  │
+│         │          │              └────────────────────────┘  │
+│         │          │                                          │
+│  ┌──────┴───────────────┐  ┌──────────┐  ┌──────────┐       │
+│  │ apollo (multi-cont.) │  │ devmcp   │  │ sheets   │       │
+│  │ ┌─────────┐┌───────┐│  │ translate│  │ translate│       │
+│  │ │ apollo  ││ cred- ││  │ bridge   │  │ bridge   │       │
+│  │ │ v1.10.0 ││ proxy ││  │ :8003    │  │ :8004    │       │
+│  │ │ :8000   ││ :8080 ││  └──────────┘  └──────────┘       │
+│  │ └─────────┘└───┬───┘│                                    │
+│  └────────────────┼────┘                                    │
+│                   │                                          │
+│  ┌────────────────┴────────────────┐                        │
+│  │ token-service                   │                        │
+│  │ Credential lifecycle manager    │                        │
+│  │ Proactive + lazy refresh        │                        │
+│  │ AES-256-GCM encrypted storage   │                        │
+│  │ :8000 (min-instances=1)         │                        │
+│  └─────────────────────────────────┘                        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-All services are **separate Cloud Run services** (not sidecars in a single container).
+**token-service** is the only always-on service (`min-instances=1`, `--cpu-always-allocated`). All others scale to zero.
+
+**Apollo** is a multi-container Cloud Run service: the Apollo MCP Server binary + a credential-proxy sidecar. Apollo sends GraphQL to `localhost:8080` (the proxy), which injects the Shopify access token and forwards to Shopify's API. Apollo never holds credentials.
+
 ContextForge connects to the backends via their public Cloud Run URLs, registered through the admin UI.
 
 ## Auth Flow
@@ -107,17 +122,42 @@ User (browser)
 | **Custom code** | `services/keycloak/Dockerfile` — bakes `realm-fluid.json` into image |
 | **Admin UI** | `https://keycloak-apanptkfaq-as.a.run.app/admin/master/console/#/fluid` |
 
-### Apollo (Shopify GraphQL)
+### Apollo (Shopify GraphQL) — multi-container
 
 | | |
 |---|---|
 | **Purpose** | Executes Shopify GraphQL queries and mutations |
 | **Image** | Custom Dockerfile — compiles Apollo MCP Server v1.10.0 from Rust source |
 | **Cloud Run URL** | `https://apollo-apanptkfaq-as.a.run.app` |
-| **Port** | 8000 |
+| **Port** | 8000 (Apollo) + 8080 (credential-proxy sidecar) |
 | **Transport** | Streamable HTTP (`/mcp` endpoint) — NOT SSE (dropped in v1.10.0) |
-| **Custom code** | `services/apollo/Dockerfile` + `config.yaml` (host validation, schema path) |
-| **Credentials** | `SHOPIFY_ACCESS_TOKEN` env var (service credential, shared by all users) |
+| **Custom code** | `services/apollo/Dockerfile` + `config.yaml`, `services/credential-proxy/` |
+| **Credentials** | **None** — Apollo holds no credentials. The credential-proxy sidecar injects `X-Shopify-Access-Token` per-request by fetching from token-service. |
+
+### token-service (credential lifecycle)
+
+| | |
+|---|---|
+| **Purpose** | Enterprise credential lifecycle manager — manages OAuth token refresh for all API providers |
+| **Image** | Custom Dockerfile — Python 3.12 + FastAPI |
+| **Cloud Run URL** | `https://token-service-apanptkfaq-as.a.run.app` |
+| **Port** | 8000 |
+| **Database** | `oauth_credentials` table in `contextforge` DB (AES-256-GCM encrypted) |
+| **Custom code** | `services/token-service/` (~400 lines Python) — first application code in the system |
+| **Key features** | Proactive refresh (every 45 min) + lazy refresh on-demand, single-flight locking, HMAC-SHA256 CSRF nonce, multi-provider schema |
+| **Config** | `min-instances=1`, `--cpu-always-allocated` (background refresh loop needs always-on CPU) |
+| **DB pool** | `pool_size=2, max_overflow=2` (4 connections max, within 50-connection budget) |
+
+### credential-proxy (sidecar)
+
+| | |
+|---|---|
+| **Purpose** | Injects fresh API credentials into outbound requests — services never hold third-party tokens |
+| **Image** | Custom Dockerfile — Python 3.12 + FastAPI (~80 lines) |
+| **Runs as** | Sidecar container inside Apollo's Cloud Run service |
+| **Port** | 8080 |
+| **Custom code** | `services/credential-proxy/proxy.py` |
+| **Behavior** | On each request: fetches token from token-service (30s cache), injects `X-Shopify-Access-Token`, forwards to Shopify API |
 
 ### devmcp (Shopify docs)
 
@@ -167,30 +207,39 @@ Backends are registered in the ContextForge **Admin UI** (not via API or scripts
 
 ## Custom Code Inventory
 
-**Zero application code.** Everything is configuration — Dockerfiles, YAML, JSON, SQL.
+**Mostly configuration, with one exception:** token-service and credential-proxy are the only application code in the system (~500 lines Python total). This is justified because no existing component in the stack handles OAuth token lifecycle — it's the one concern that can't be solved with config alone.
+
+### Configuration (no application logic)
 
 | File | Lines | Purpose |
 |------|-------|---------|
 | `services/keycloak/Dockerfile` | ~50 | Bakes realm JSON into stock Keycloak image |
 | `services/keycloak/realm-fluid.json` | ~1900 | Realm config: client, roles, scopes, mappers |
 | `services/apollo/Dockerfile` | ~65 | Multi-stage Rust build of Apollo MCP Server |
-| `services/apollo/config.yaml` | ~20 | Endpoint, transport, host validation, schema path |
+| `services/apollo/config.yaml` | ~20 | Endpoint → credential-proxy, no credentials |
+| `services/apollo/config-local.yaml` | ~20 | Local dev override (Docker service name) |
+| `services/apollo/apollo-service.yaml` | ~35 | Cloud Run multi-container spec |
 | `services/apollo/shopify-schema.graphql` | ~98K | Shopify Admin API schema (baked into image) |
 | `services/devmcp/Dockerfile` | ~50 | ContextForge base + npm install @shopify/dev-mcp |
-| `services/devmcp/package.json` | ~5 | Pins dev-mcp version |
 | `services/sheets/Dockerfile` | ~50 | ContextForge base + pip install mcp-google-sheets |
-| `services/sheets/requirements.txt` | ~1 | Pins sheets version |
-| `services/contextforge/db/init.sql` | ~20 | Creates contextforge DB + least-privilege user |
-| `services/keycloak/db/init.sql` | ~20 | Creates keycloak DB + least-privilege user |
+| `services/contextforge/db/init.sql` | ~20 | Creates contextforge DB + user |
+| `services/keycloak/db/init.sql` | ~20 | Creates keycloak DB + user |
+| `services/token-service/db/init.sql` | ~30 | Creates oauth_credentials table + user |
 | `services/db-init.sh` | ~15 | Wrapper script for docker-compose postgres init |
-| `docker-compose.yml` | ~200 | Local dev stack (all 6 services) |
-| `services/keycloak/tests/test_realm_json.py` | ~250 | Validates realm JSON structure |
+| `docker-compose.yml` | ~280 | Local dev stack (all 8 services) |
 
-**If you're looking for "the code" — there is none.** The system is composed entirely of:
-- Stock open-source images (ContextForge, Keycloak)
-- Custom Dockerfiles that package open-source tools (Apollo, dev-mcp, sheets)
-- Configuration files (realm JSON, Apollo config, env vars)
-- Infrastructure files (docker-compose, SQL init)
+### Application code (token lifecycle only)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `services/token-service/app/main.py` | ~40 | FastAPI app, lifespan, route registration |
+| `services/token-service/app/encryption.py` | ~25 | AES-256-GCM encrypt/decrypt |
+| `services/token-service/app/services/token_manager.py` | ~150 | Single-flight lock, proactive + lazy refresh |
+| `services/token-service/app/services/state_nonce.py` | ~40 | HMAC-SHA256 CSRF nonce |
+| `services/token-service/app/providers/shopify.py` | ~70 | Shopify OAuth refresh, exchange, authorize |
+| `services/token-service/app/routes/*.py` | ~120 | API endpoints (token, oauth, admin, health) |
+| `services/credential-proxy/proxy.py` | ~80 | Token injection proxy (sidecar) |
+| **Total application code** | **~525** | |
 
 ## Cloud Run Configuration
 
@@ -210,13 +259,21 @@ The old format (`*-1056128102929.asia-southeast1.run.app`) still works but is de
 | `keycloak-db-password` | Keycloak (`KC_DB_PASSWORD`) |
 | `keycloak-admin-password` | Keycloak (`KC_BOOTSTRAP_ADMIN_PASSWORD`) |
 
+### New secrets needed for token-service
+
+| Secret name | Used by | Status |
+|------------|---------|--------|
+| `token-encryption-key` | token-service (`TOKEN_ENCRYPTION_KEY`) | Create in Secret Manager |
+| `shopify-client-secret` | token-service (`SHOPIFY_CLIENT_SECRET`) | Create in Secret Manager |
+
 ### Secrets NOT yet in Secret Manager (plain env vars)
 
 | Env var | Service | Action needed |
 |---------|---------|---------------|
-| `SHOPIFY_ACCESS_TOKEN` | Apollo | Move to Secret Manager |
 | `SSO_KEYCLOAK_CLIENT_SECRET` | ContextForge | Move to Secret Manager |
 | `DATABASE_URL` (contains cred) | ContextForge | Move to Secret Manager |
+
+Note: `SHOPIFY_ACCESS_TOKEN` is no longer used — Apollo gets tokens dynamically via credential-proxy → token-service.
 
 ## GCP Resources
 

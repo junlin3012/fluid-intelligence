@@ -25,9 +25,11 @@ Before writing code, agents MUST read:
 ├── services/                 One folder per Cloud Run service
 │   ├── contextforge/           Stock image, DB init only
 │   ├── keycloak/               Custom Dockerfile (realm import)
-│   ├── apollo/                 Custom Dockerfile (Rust build)
+│   ├── apollo/                 Custom Dockerfile (Rust build) + credential-proxy sidecar
 │   ├── devmcp/                 Custom Dockerfile (translate bridge)
-│   └── sheets/                 Custom Dockerfile (translate bridge)
+│   ├── sheets/                 Custom Dockerfile (translate bridge)
+│   ├── token-service/          Credential lifecycle manager (Python/FastAPI)
+│   └── credential-proxy/       Token injection sidecar (Python/FastAPI)
 ├── docs/
 │   ├── architecture.md         System overview (start here)
 │   ├── config-reference.md     All env vars across services
@@ -37,7 +39,7 @@ Before writing code, agents MUST read:
 │   ├── research/               Market research, capabilities analysis
 │   ├── specs/                  Active design specs
 │   └── archive/                Superseded docs (v3 operations, old specs, reviews)
-├── docker-compose.yml          Local dev stack (all 6 services)
+├── docker-compose.yml          Local dev stack (all 8 services)
 ├── .env.example                Template for local dev secrets
 ├── CLAUDE.md                   This file
 ├── README.md
@@ -48,7 +50,7 @@ Before writing code, agents MUST read:
 
 - **Inventory before designing.** Check what ContextForge/Cloud Run already provide before proposing features.
 - **Identity before plumbing.** Answer WHO before HOW. Users are humans with names, not token hashes.
-- **Configure, don't code.** This system has zero application code. Everything is config. Keep it that way.
+- **Configure, don't code.** This system is config-first. The only application code is token-service + credential-proxy (~525 lines) — justified because no existing component handles OAuth token lifecycle. Everything else is config. Keep it that way.
 - **Read source before writing config.** Never guess env var names, CLI flags, or API endpoints.
 - **Test locally before Cloud Run.** `docker compose up` + browser test catches everything.
 - **Act autonomously.** No confirmation needed before running commands or making changes.
