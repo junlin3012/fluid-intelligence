@@ -1,0 +1,10 @@
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+httpx==0.28.*
+sqlalchemy[asyncio]==2.0.*
+asyncpg==0.30.*
+cryptography==44.*
+prometheus-client==0.22.*
+google-auth==2.38.*
+pytest==8.*
+pytest-asyncio==0.25.*

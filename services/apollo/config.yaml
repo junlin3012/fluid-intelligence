@@ -1,5 +1,7 @@
-# Apollo MCP Server config — Shopify GraphQL
-endpoint: https://${env.SHOPIFY_STORE}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json
+# Apollo MCP Server config — Shopify GraphQL (Cloud Run production)
+# Apollo talks to credential-proxy sidecar at localhost:8080.
+# The proxy injects X-Shopify-Access-Token and forwards to Shopify.
+endpoint: http://localhost:8080/admin/api/${env.SHOPIFY_API_VERSION:-2026-01}/graphql.json
 
 transport:
   type: streamable_http
@@ -21,5 +23,4 @@ introspection:
   validate:
     enabled: true
 
-headers:
-  X-Shopify-Access-Token: ${env.SHOPIFY_ACCESS_TOKEN}
+headers: {}

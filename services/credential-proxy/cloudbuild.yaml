@@ -1,0 +1,6 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy:$COMMIT_SHA', '.']
+    dir: 'services/credential-proxy'
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy:$COMMIT_SHA']

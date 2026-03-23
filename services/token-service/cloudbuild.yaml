@@ -1,0 +1,22 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/token-service:$COMMIT_SHA', '.']
+    dir: 'services/token-service'
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/token-service:$COMMIT_SHA']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'token-service'
+      - '--image=asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/token-service:$COMMIT_SHA'
+      - '--region=asia-southeast1'
+      - '--min-instances=1'
+      - '--max-instances=1'
+      - '--cpu-always-allocated'
+      - '--memory=256Mi'
+      - '--set-secrets=TOKEN_ENCRYPTION_KEY=token-encryption-key:latest,SHOPIFY_CLIENT_SECRET=shopify-client-secret:latest'
+      - '--set-env-vars=SHOPIFY_CLIENT_ID=f597c0aaa02fac7278a54c617d7b344d,DB_POOL_SIZE=2,DB_MAX_OVERFLOW=2,FORWARDED_ALLOW_IPS=*,DATABASE_URL=postgresql+asyncpg://token_service_user:PASSWORD@/contextforge?host=/cloudsql/junlinleather-mcp:asia-southeast1:contextforge'
+      - '--add-cloudsql-instances=junlinleather-mcp:asia-southeast1:contextforge'
+      - '--no-allow-unauthenticated'

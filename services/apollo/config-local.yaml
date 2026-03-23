@@ -1,0 +1,22 @@
+# Apollo MCP Server config — local development (docker-compose)
+# Points at credential-proxy Docker service instead of localhost.
+endpoint: http://credential-proxy:8080/admin/api/2026-01/graphql.json
+
+transport:
+  type: streamable_http
+  address: 0.0.0.0
+  port: 8000
+  host_validation:
+    enabled: false
+
+schema:
+  source: local
+  path: /app/shopify-schema.graphql
+
+introspection:
+  execute:
+    enabled: true
+  validate:
+    enabled: true
+
+headers: {}
