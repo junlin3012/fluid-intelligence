@@ -22,14 +22,19 @@ Before writing code, agents MUST read:
 ## Project Structure
 
 ```
-├── services/                 One folder per Cloud Run service
-│   ├── contextforge/           Stock image, DB init only
-│   ├── keycloak/               Custom Dockerfile (realm import)
-│   ├── apollo/                 Custom Dockerfile (Rust build) + credential-proxy sidecar
-│   ├── devmcp/                 Custom Dockerfile (translate bridge)
-│   ├── sheets/                 Custom Dockerfile (translate bridge)
-│   ├── token-service/          Credential lifecycle manager (Python/FastAPI)
-│   └── credential-proxy/       Token injection sidecar (Python/FastAPI)
+├── services/
+│   ├── platform/               Gateway infrastructure (provider-agnostic)
+│   │   ├── contextforge/         Stock image, DB init only
+│   │   ├── keycloak/             Custom Dockerfile (realm import)
+│   │   ├── token-service/        Credential lifecycle manager (Python/FastAPI)
+│   │   └── credential-proxy/     Token injection sidecar (Python/FastAPI)
+│   ├── verticals/              Third-party API integrations (consumers of platform)
+│   │   ├── shopify/
+│   │   │   ├── apollo/           Custom Dockerfile (Rust build)
+│   │   │   └── devmcp/           Custom Dockerfile (translate bridge)
+│   │   └── google/
+│   │       └── sheets/           Custom Dockerfile (translate bridge)
+│   └── db-init.sh              Shared DB bootstrap
 ├── docs/
 │   ├── architecture.md         System overview (start here)
 │   ├── config-reference.md     All env vars across services

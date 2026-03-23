@@ -34,9 +34,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./services/db-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
-      - ./services/contextforge/db/init.sql:/docker-entrypoint-initdb.d/sql/01-contextforge.sql:ro
-      - ./services/keycloak/db/init.sql:/docker-entrypoint-initdb.d/sql/02-keycloak.sql:ro
-      - ./services/token-service/db/init.sql:/docker-entrypoint-initdb.d/sql/03-token-service.sql:ro
+      - ./services/platform/contextforge/db/init.sql:/docker-entrypoint-initdb.d/sql/01-contextforge.sql:ro
+      - ./services/platform/keycloak/db/init.sql:/docker-entrypoint-initdb.d/sql/02-keycloak.sql:ro
+      - ./services/platform/token-service/db/init.sql:/docker-entrypoint-initdb.d/sql/03-token-service.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -51,7 +51,7 @@ services:
   # ── 2. Keycloak ────────────────────────────────────────────────────
   keycloak:
     build:
-      context: ./services/keycloak
+      context: ./services/platform/keycloak
       dockerfile: Dockerfile
     environment:
       KC_DB: postgres
@@ -143,14 +143,14 @@ services:
   # ── 4. Apollo MCP Server ───────────────────────────────────────────
   apollo:
     build:
-      context: ./services/apollo
+      context: ./services/verticals/shopify/apollo
       dockerfile: Dockerfile
     environment:
       SHOPIFY_API_VERSION: "${SHOPIFY_API_VERSION:-2026-01}"
       APOLLO_GRAPH_REF: "${APOLLO_GRAPH_REF:-shopify-fluid-intelligence@current}"
       APOLLO_KEY: "${APOLLO_KEY}"
     volumes:
-      - ./services/apollo/config-local.yaml:/app/config.yaml:ro
+      - ./services/verticals/shopify/apollo/config-local.yaml:/app/config.yaml:ro
     depends_on:
       credential-proxy:
         condition: service_healthy
@@ -168,7 +168,7 @@ services:
   # ── 5. dev-mcp ─────────────────────────────────────────────────────
   devmcp:
     build:
-      context: ./services/devmcp
+      context: ./services/verticals/shopify/devmcp
       dockerfile: Dockerfile
     # Port 8003 is hardcoded in Dockerfile CMD, not configurable via env var
     healthcheck:
@@ -185,7 +185,7 @@ services:
   # ── 6. Google Sheets ───────────────────────────────────────────────
   sheets:
     build:
-      context: ./services/sheets
+      context: ./services/verticals/google/sheets
       dockerfile: Dockerfile
     # Port 8004 is hardcoded in Dockerfile CMD, not configurable via env var
     healthcheck:
@@ -202,7 +202,7 @@ services:
   # ── 7. Token Service ─────────────────────────────────────────────
   token-service:
     build:
-      context: ./services/token-service
+      context: ./services/platform/token-service
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: "postgresql+asyncpg://token_service_user:${TOKEN_SERVICE_DB_PASS:?required}@postgres:5432/contextforge"
@@ -232,7 +232,7 @@ services:
   # ── 8. Credential Proxy ──────────────────────────────────────────
   credential-proxy:
     build:
-      context: ./services/credential-proxy
+      context: ./services/platform/credential-proxy
       dockerfile: Dockerfile
     environment:
       TOKEN_SERVICE_URL: "http://token-service:8000"

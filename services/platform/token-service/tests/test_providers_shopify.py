@@ -5,13 +5,13 @@ from app.providers.shopify import ShopifyProvider
 from app.providers.base import InvalidGrantError
 
 TEST_CLIENT_ID = "test_client_id"
-TEST_CLIENT_SECRET = "test_client_secret"
+TEST_APP_CREDENTIAL = "test_app_credential"
 TEST_SHOP = "test.myshopify.com"
 TEST_OLD_TOKEN = "shprt_old_refresh"
 
 @pytest.fixture
 def provider():
-    return ShopifyProvider(client_id=TEST_CLIENT_ID, client_secret=TEST_CLIENT_SECRET)
+    return ShopifyProvider(client_id=TEST_CLIENT_ID, client_secret=TEST_APP_CREDENTIAL)
 
 def _make_mock_client(response):
     mock_client = AsyncMock()
