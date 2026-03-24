@@ -21,13 +21,11 @@ spec:
               cpu: "1"
         - name: credential-proxy
           image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy:latest
-          ports:
-            - containerPort: 8080
           env:
             - name: FORWARDED_ALLOW_IPS
               value: "*"
             - name: TOKEN_SERVICE_URL
-              value: "https://token-service-apanptkfaq-as.a.run.app"
+              value: "https://token-service-1056128102929.asia-southeast1.run.app"
             - name: SHOPIFY_HOST
               value: "https://junlinleather-5148.myshopify.com"
           resources:
