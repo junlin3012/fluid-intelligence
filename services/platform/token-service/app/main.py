@@ -42,3 +42,12 @@ app.include_router(health.router)
 app.include_router(token.router)
 app.include_router(oauth.router)
 app.include_router(admin.router)
+
+
+@app.get("/")
+async def root(shop: str = None):
+    """Shopify sends users here after managed install. Redirect to OAuth connect."""
+    if shop:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(f"/connect/shopify?shop={shop}")
+    return {"service": "token-service", "status": "ok"}
