@@ -48,6 +48,11 @@ app.include_router(admin.router)
 async def root(shop: str = None):
     """Shopify sends users here after managed install. Redirect to OAuth connect."""
     if shop:
+        import re
+        from fastapi import HTTPException
         from fastapi.responses import RedirectResponse
+        # Validate shop domain to prevent open redirect (M5)
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-]*\.myshopify\.com$', shop):
+            raise HTTPException(status_code=400, detail="Invalid shop domain")
         return RedirectResponse(f"/connect/shopify?shop={shop}")
     return {"service": "token-service", "status": "ok"}

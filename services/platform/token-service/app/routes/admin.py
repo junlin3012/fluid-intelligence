@@ -1,9 +1,11 @@
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 
+from app.auth import require_api_key
+from app.config import settings
 from app.db import async_session
 from app.models import OAuthCredential
 
@@ -12,7 +14,9 @@ token_manager = None
 
 
 @router.post("/rotate/{provider}")
-async def rotate(provider: str, account_id: Optional[str] = None):
+async def rotate(request: Request, provider: str, account_id: Optional[str] = None):
+    require_api_key(request, settings.TOKEN_SERVICE_API_KEY)
+
     if not account_id:
         async with async_session() as session:
             stmt = select(OAuthCredential.account_id).where(
@@ -33,7 +37,9 @@ async def rotate(provider: str, account_id: Optional[str] = None):
 
 
 @router.get("/status")
-async def status():
+async def status(request: Request):
+    require_api_key(request, settings.TOKEN_SERVICE_API_KEY)
+
     async with async_session() as session:
         result = await session.execute(select(OAuthCredential))
         creds = result.scalars().all()

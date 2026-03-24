@@ -8,36 +8,36 @@ from fastapi import FastAPI, Request, Response
 
 logger = logging.getLogger(__name__)
 
-TOKEN_SERVICE_URL = os.environ.get(
-    "TOKEN_SERVICE_URL",
-    "https://token-service-apanptkfaq-as.a.run.app"
-)
-SHOPIFY_HOST = os.environ.get(
-    "SHOPIFY_HOST",
-    "https://junlinleather-5148.myshopify.com"
-)
+TOKEN_SERVICE_URL = os.environ.get("TOKEN_SERVICE_URL", "")
+SHOPIFY_HOST = os.environ.get("SHOPIFY_HOST", "")
+TOKEN_SERVICE_API_KEY = os.environ.get("TOKEN_SERVICE_API_KEY", "")
 IS_CLOUD_RUN = os.environ.get("K_SERVICE") is not None
+
+if not TOKEN_SERVICE_URL or not SHOPIFY_HOST or not TOKEN_SERVICE_API_KEY:
+    if IS_CLOUD_RUN:
+        raise RuntimeError("FATAL: TOKEN_SERVICE_URL, SHOPIFY_HOST, and TOKEN_SERVICE_API_KEY are required")
+    else:
+        # Local dev: allow defaults
+        TOKEN_SERVICE_URL = TOKEN_SERVICE_URL or "http://token-service:8000"
+        SHOPIFY_HOST = SHOPIFY_HOST or "https://junlinleather-dev.myshopify.com"
+        TOKEN_SERVICE_API_KEY = TOKEN_SERVICE_API_KEY or "local-dev-key"
 
 token_client: Optional[httpx.AsyncClient] = None
 shopify_client: Optional[httpx.AsyncClient] = None
 
 
 def _get_iam_headers() -> dict:
-    """Get IAM ID token for service-to-service auth on Cloud Run."""
+    """Get IAM ID token for service-to-service auth on Cloud Run.
+    FAIL-CLOSED: raises on failure instead of returning empty headers."""
     if not IS_CLOUD_RUN:
         return {}
-    try:
-        # Fetch ID token from metadata server (no external library needed)
-        metadata_url = (
-            "http://metadata.google.internal/computeMetadata/v1/"
-            f"instance/service-accounts/default/identity?audience={TOKEN_SERVICE_URL}"
-        )
-        resp = httpx.get(metadata_url, headers={"Metadata-Flavor": "Google"}, timeout=5)
-        resp.raise_for_status()
-        return {"Authorization": f"Bearer {resp.text}"}
-    except Exception as e:
-        logger.warning(f"Failed to get IAM token, proceeding without: {e}")
-        return {}
+    metadata_url = (
+        "http://metadata.google.internal/computeMetadata/v1/"
+        f"instance/service-accounts/default/identity?audience={TOKEN_SERVICE_URL}"
+    )
+    resp = httpx.get(metadata_url, headers={"Metadata-Flavor": "Google"}, timeout=5)
+    resp.raise_for_status()  # Crash, don't degrade
+    return {"Authorization": f"Bearer {resp.text}"}
 
 
 @asynccontextmanager
@@ -67,6 +67,9 @@ async def get_token() -> str:
         return _cached_token
 
     headers = _get_iam_headers()
+    # App-level API key — defense-in-depth on top of IAM
+    headers["X-Token-Service-Key"] = TOKEN_SERVICE_API_KEY
+
     resp = await token_client.get("/token/shopify", headers=headers)
     resp.raise_for_status()
     _cached_token = resp.json()["access_token"]

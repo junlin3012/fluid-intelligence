@@ -209,8 +209,9 @@ services:
       DB_POOL_SIZE: "2"
       DB_MAX_OVERFLOW: "2"
       TOKEN_ENCRYPTION_KEY: "${TOKEN_ENCRYPTION_KEY:?required}"
-      SHOPIFY_CLIENT_ID: "${SHOPIFY_CLIENT_ID}"
-      SHOPIFY_CLIENT_SECRET: "${SHOPIFY_CLIENT_SECRET}"
+      SHOPIFY_CLIENT_ID: "${SHOPIFY_CLIENT_ID:?required}"
+      SHOPIFY_CLIENT_SECRET: "${SHOPIFY_CLIENT_SECRET:?required}"
+      TOKEN_SERVICE_API_KEY: "${TOKEN_SERVICE_API_KEY:?required}"
       BASE_URL: "http://localhost:8010"
       FORWARDED_ALLOW_IPS: "*"
     ports:
@@ -237,6 +238,7 @@ services:
     environment:
       TOKEN_SERVICE_URL: "http://token-service:8000"
       SHOPIFY_HOST: "https://${SHOPIFY_STORE:-junlinleather-5148.myshopify.com}"
+      TOKEN_SERVICE_API_KEY: "${TOKEN_SERVICE_API_KEY:?required}"
       FORWARDED_ALLOW_IPS: "*"
     depends_on:
       token-service:
