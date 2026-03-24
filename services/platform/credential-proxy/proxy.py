@@ -1,9 +1,12 @@
 import os
 import time
+import logging
 import httpx
 from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, Request, Response
+
+logger = logging.getLogger(__name__)
 
 TOKEN_SERVICE_URL = os.environ.get(
     "TOKEN_SERVICE_URL",
@@ -13,9 +16,28 @@ SHOPIFY_HOST = os.environ.get(
     "SHOPIFY_HOST",
     "https://junlinleather-5148.myshopify.com"
 )
+IS_CLOUD_RUN = os.environ.get("K_SERVICE") is not None
 
 token_client: Optional[httpx.AsyncClient] = None
 shopify_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_iam_headers() -> dict:
+    """Get IAM ID token for service-to-service auth on Cloud Run."""
+    if not IS_CLOUD_RUN:
+        return {}
+    try:
+        # Fetch ID token from metadata server (no external library needed)
+        metadata_url = (
+            "http://metadata.google.internal/computeMetadata/v1/"
+            f"instance/service-accounts/default/identity?audience={TOKEN_SERVICE_URL}"
+        )
+        resp = httpx.get(metadata_url, headers={"Metadata-Flavor": "Google"}, timeout=5)
+        resp.raise_for_status()
+        return {"Authorization": f"Bearer {resp.text}"}
+    except Exception as e:
+        logger.warning(f"Failed to get IAM token, proceeding without: {e}")
+        return {}
 
 
 @asynccontextmanager
@@ -44,7 +66,8 @@ async def get_token() -> str:
     if _cached_token and time.time() - _cached_at < 30:
         return _cached_token
 
-    resp = await token_client.get("/token/shopify")
+    headers = _get_iam_headers()
+    resp = await token_client.get("/token/shopify", headers=headers)
     resp.raise_for_status()
     _cached_token = resp.json()["access_token"]
     _cached_at = time.time()
