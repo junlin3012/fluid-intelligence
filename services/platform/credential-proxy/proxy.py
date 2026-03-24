@@ -70,7 +70,9 @@ async def get_token() -> str:
     # App-level API key — defense-in-depth on top of IAM
     headers["X-Token-Service-Key"] = TOKEN_SERVICE_API_KEY
 
-    resp = await token_client.get("/token/shopify", headers=headers)
+    # Specify account_id to handle multi-store (production + dev)
+    shop = SHOPIFY_HOST.replace("https://", "")
+    resp = await token_client.get(f"/token/shopify?account_id={shop}", headers=headers)
     resp.raise_for_status()
     _cached_token = resp.json()["access_token"]
     _cached_at = time.time()
