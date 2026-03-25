@@ -90,3 +90,23 @@ Every v3-v5 deployment failure could have been caught with `docker-compose up` +
 
 **When a client reports an error, the bug might be in the client.**
 Claude.ai OAuth bug caused us to debug the server side for hours. Search for known client issues first.
+
+## Auth (added 2026-03-25)
+
+**ContextForge only verifies its own JWTs by default.**
+Stock 1.0.0-RC-2 rejects any token with `iss != "mcpgateway"`. PR #3715 adds JWKS verification for external IdP tokens. Without it, Keycloak-issued tokens are rejected even when SSO is configured.
+
+**Claude Code crashes on multi-line MCP tool descriptions.**
+ContextForge returns tool descriptions with 1000+ chars and newlines. This triggers Anthropic API error: `cache_control cannot be set for empty text blocks`. The tools work (verified via curl), but Claude Code can't use them. This is a Claude Code bug, not ContextForge.
+
+**Claude.ai skips the OAuth authorize step.**
+Claude.ai does DCR (201), reads metadata (200), but never redirects the user to `/authorize`. It loops back to the MCP endpoint without a token. This is bug #82 — the OAuth state machine is incomplete. No server-side fix possible.
+
+**Keycloak DCR has multiple policy layers.**
+Anonymous DCR requires passing: Trusted Hosts, Allowed Client Scopes, Max Clients, and Protocol Mapper policies. Claude.ai requests `service_account` scope which must be explicitly allowed. Each policy rejects independently — check Keycloak logs for the specific policy name.
+
+**ContextForge listens on port 4444 locally, not 8080.**
+Despite `MCG_PORT=8080` being set, the stock image binds to 4444 in Docker. Map `8080:4444` in docker-compose. On Cloud Run, `PORT=8080` is injected by the platform and works correctly.
+
+**Auth-proxy health check must not depend on upstream.**
+In multi-container Cloud Run, the ingress container's startup probe runs before sidecars are ready. Auth-proxy must return 200 on `/health` independently, not proxy to the upstream.

@@ -1,13 +1,13 @@
 # Architecture
 
-> v6.1 — Last updated 2026-03-24.
+> v6.2 — Last updated 2026-03-25.
 > This is the single source of truth for how Fluid Intelligence works.
 
 ---
 
 ## System Topology
 
-7 Cloud Run services + 1 Cloud SQL PostgreSQL instance:
+8 Cloud Run services + 1 Cloud SQL PostgreSQL instance:
 
 ```
                         ┌─────────────────────────────┐
@@ -28,35 +28,39 @@
 │  Cloud Run Services          │          │      │               │
 │                              │          │      │               │
 │  ┌───────────────────────────┴──┐  ┌────┴──────┴───────────┐  │
-│  │ contextforge                 │  │ keycloak              │  │
+│  │ contextforge (patched)       │  │ keycloak              │  │
 │  │ IBM ContextForge 1.0.0-RC-2 │  │ Keycloak 26.1.4       │  │
-│  │ MCP gateway + admin UI      │◄─┤ Identity broker        │  │
+│  │ + PR #3715 (JWKS verify)    │◄─┤ Identity broker        │  │
 │  │ :8080                       │  │ Google + Microsoft IdPs│  │
 │  └──────┬──────────┬───────────┘  │ :8080                  │  │
-│         │          │              └────────────────────────┘  │
-│         │          │                                          │
-│  ┌──────┴───────────────┐  ┌──────────┐  ┌──────────┐       │
-│  │ apollo (multi-cont.) │  │ devmcp   │  │ sheets   │       │
-│  │ ┌─────────┐┌───────┐│  │ translate│  │ translate│       │
-│  │ │ apollo  ││ cred- ││  │ bridge   │  │ bridge   │       │
-│  │ │ v1.10.0 ││ proxy ││  │ :8003    │  │ :8004    │       │
-│  │ │ :8000   ││ :8080 ││  └──────────┘  └──────────┘       │
-│  │ └─────────┘└───┬───┘│                                    │
-│  └────────────────┼────┘                                    │
-│                   │                                          │
-│  ┌────────────────┴────────────────┐                        │
-│  │ token-service                   │                        │
-│  │ Credential lifecycle manager    │                        │
-│  │ Proactive + lazy refresh        │                        │
-│  │ AES-256-GCM encrypted storage   │                        │
-│  │ :8000 (min-instances=1)         │                        │
-│  └─────────────────────────────────┘                        │
-└─────────────────────────────────────────────────────────────┘
+│         │          │              └─────────┬──────────────┘  │
+│         │          │                        │                  │
+│  ┌──────┴───────────────────────┐  ┌───────┴───┐              │
+│  │ apollo (3-container)         │  │oauth-proxy│              │
+│  │ ┌────────┐┌───────┐┌──────┐│  │ Caddy     │              │
+│  │ │auth-   ││apollo ││cred- ││  │ bug #82   │              │
+│  │ │proxy   ││v1.10.0││proxy ││  │ workaround│              │
+│  │ │:8000   ││:8001  ││:8080 ││  └───────────┘              │
+│  │ │Keycloak││       ││      ││                              │
+│  │ │JWT ✓   ││       ││      ││  ┌──────────┐  ┌──────────┐ │
+│  │ └────────┘└───────┘└──┬───┘│  │ devmcp   │  │ sheets   │ │
+│  └───────────────────────┼────┘  │ :8003    │  │ :8004    │ │
+│                          │       │ ⚠ NO AUTH│  │ ⚠ NO AUTH│ │
+│  ┌───────────────────────┴────┐  └──────────┘  └──────────┘ │
+│  │ token-service              │                              │
+│  │ Credential lifecycle mgr   │                              │
+│  │ :8000 (min-instances=1)    │                              │
+│  └────────────────────────────┘                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 **token-service** is the only always-on service (`min-instances=1`, `--cpu-always-allocated`). All others scale to zero.
 
-**Apollo** is a multi-container Cloud Run service: the Apollo MCP Server binary + a credential-proxy sidecar. Apollo sends GraphQL to `localhost:8080` (the proxy), which injects the Shopify access token and forwards to Shopify's API. Apollo never holds credentials.
+**Apollo** is a 3-container Cloud Run service: auth-proxy (Keycloak JWT validation) + Apollo MCP Server (Rust binary) + credential-proxy (Shopify token injection). Requests flow: auth-proxy validates the Keycloak JWT → Apollo processes the MCP request → credential-proxy injects the Shopify access token → Shopify API. Apollo never holds credentials or handles auth.
+
+**ContextForge** is patched with PR #3715 (JWKS verification for IdP-issued tokens). However, Claude Code crashes when using ContextForge tools due to multi-line tool descriptions triggering an Anthropic API bug (`cache_control cannot be set for empty text blocks`). ContextForge is deployed and working but **not currently usable from Claude Code**.
+
+**oauth-proxy** is a Caddy reverse proxy that works around Claude.ai bug #82 (hardcoded OAuth paths). It routes `/authorize`, `/token`, `/register`, and `/realms/*` to Keycloak while passing everything else to ContextForge. However, Claude.ai's OAuth client skips the authorization step entirely, so it does not work yet.
 
 ContextForge connects to the backends via their public Cloud Run URLs, registered through the admin UI.
 
@@ -98,17 +102,18 @@ User (browser)
 
 ## Service Details
 
-### ContextForge (gateway)
+### ContextForge (gateway) — PARTIALLY WORKING
 
 | | |
 |---|---|
 | **Purpose** | MCP gateway core — tool aggregation, RBAC, admin UI, SSO |
-| **Image** | `ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2` (stock, no custom Dockerfile) |
+| **Image** | `ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2` + PR #3715 patch (JWKS verification) |
 | **Cloud Run URL** | `https://contextforge-apanptkfaq-as.a.run.app` |
 | **Port** | 8080 |
 | **Database** | `contextforge` on Cloud SQL |
-| **Custom code** | None — entirely configured via env vars |
+| **Custom code** | `services/platform/contextforge/Dockerfile` — patches 2 Python files for PR #3715 |
 | **Key config** | See `config-reference.md` (25+ env vars) |
+| **Status** | Auth works (JWKS verification verified). **Blocked for Claude Code** — tool descriptions with multi-line text trigger Anthropic API bug (`cache_control cannot be set for empty text blocks`). **Blocked for Claude.ai** — bug #82 (OAuth client skips authorize step). |
 
 ### Keycloak (identity)
 
@@ -122,17 +127,20 @@ User (browser)
 | **Custom code** | `services/keycloak/Dockerfile` — bakes `realm-fluid.json` into image |
 | **Admin UI** | `https://keycloak-apanptkfaq-as.a.run.app/admin/master/console/#/fluid` |
 
-### Apollo (Shopify GraphQL) — multi-container
+### Apollo (Shopify GraphQL) — 3-container, Keycloak-authenticated
 
 | | |
 |---|---|
 | **Purpose** | Executes Shopify GraphQL queries and mutations |
 | **Image** | Custom Dockerfile — compiles Apollo MCP Server v1.10.0 from Rust source |
 | **Cloud Run URL** | `https://apollo-apanptkfaq-as.a.run.app` |
-| **Port** | 8000 (Apollo) + 8080 (credential-proxy sidecar) |
+| **Containers** | auth-proxy (:8000, ingress) + Apollo (:8001) + credential-proxy (:8080) |
 | **Transport** | Streamable HTTP (`/mcp` endpoint) — NOT SSE (dropped in v1.10.0) |
-| **Custom code** | `services/apollo/Dockerfile` + `config.yaml`, `services/credential-proxy/` |
+| **Auth** | Keycloak JWT validated by auth-proxy sidecar via JWKS. RFC 9728 metadata served for `mcp-remote` OAuth discovery. |
+| **Custom code** | `services/verticals/shopify/apollo/Dockerfile` + `config.yaml`, `services/platform/credential-proxy/`, `services/platform/auth-proxy/` |
 | **Credentials** | **None** — Apollo holds no credentials. The credential-proxy sidecar injects `X-Shopify-Access-Token` per-request by fetching from token-service. |
+| **Tools** | `execute` (run GraphQL), `validate` (check query against schema) |
+| **Service YAML** | `apollo-service-authenticated.yaml` (3-container spec) |
 
 ### token-service (credential lifecycle)
 
@@ -158,6 +166,28 @@ User (browser)
 | **Port** | 8080 |
 | **Custom code** | `services/credential-proxy/proxy.py` |
 | **Behavior** | On each request: fetches token from token-service (30s cache), injects `X-Shopify-Access-Token`, forwards to Shopify API |
+
+### auth-proxy (Keycloak JWT sidecar)
+
+| | |
+|---|---|
+| **Purpose** | Validates Keycloak JWT tokens via JWKS before forwarding to upstream services |
+| **Image** | Custom Dockerfile — Python 3.12 + FastAPI (~70 lines) |
+| **Runs as** | Sidecar container inside Apollo's Cloud Run service (ingress) |
+| **Port** | 8000 |
+| **Custom code** | `services/platform/auth-proxy/proxy.py` |
+| **Behavior** | On each request: extracts Bearer token → verifies JWT signature against Keycloak JWKS → forwards authenticated requests to upstream. Serves RFC 9728 metadata for `mcp-remote` OAuth discovery. Health checks return 200 without auth. |
+
+### oauth-proxy (Claude.ai bug #82 workaround)
+
+| | |
+|---|---|
+| **Purpose** | Routes OAuth paths to Keycloak for Claude.ai which hardcodes `/authorize`, `/token` on the MCP domain |
+| **Image** | `caddy:2-alpine` + custom Caddyfile |
+| **Cloud Run URL** | `https://oauth-proxy-apanptkfaq-as.a.run.app` |
+| **Port** | 8080 |
+| **Custom code** | `services/platform/oauth-proxy/Caddyfile` (~50 lines, zero application code) |
+| **Status** | Deployed and working (DCR, metadata, path routing all verified). **Blocked** — Claude.ai's OAuth client skips the authorize step entirely (bug #82). Remove when Anthropic fixes the bug. |
 
 ### devmcp (Shopify docs)
 
@@ -242,6 +272,20 @@ Backends are registered in the ContextForge **Admin UI** (not via API or scripts
 | **Total application code** | **~525** | |
 
 ## Cloud Run Configuration
+
+### Endpoint Security Status (as of 2026-03-25)
+
+| Service | Auth | Method | Status |
+|---------|------|--------|--------|
+| **apollo** | Keycloak JWT | auth-proxy sidecar validates via JWKS | **Secured** |
+| **contextforge** | Keycloak SSO | Native `SSO_KEYCLOAK_ENABLED=true` + PR #3715 | **Secured** (but unusable from Claude Code) |
+| **keycloak** | Public | Login pages are public by design | **OK** |
+| **oauth-proxy** | Keycloak JWT | Forwards auth to ContextForge/Keycloak | **Secured** |
+| **token-service** | API key | `TOKEN_SERVICE_API_KEY` required on all endpoints | **Secured** |
+| **devmcp** | **NONE** | `/sse` endpoint is publicly accessible | **NOT SECURED** |
+| **sheets** | **NONE** | `/sse` endpoint is publicly accessible | **NOT SECURED** |
+
+**TODO:** Add auth-proxy sidecar to devmcp and sheets (same pattern as Apollo).
 
 ### URL Format
 

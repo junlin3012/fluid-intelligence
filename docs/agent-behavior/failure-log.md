@@ -38,3 +38,17 @@
 14. **Cloud SQL `db-f1-micro` has only 25 max_connections.** Keycloak + ContextForge exhaust the pool. Bumped to 50. (v6: Keycloak crash)
 
 15. **Cloud Run URL formats must be consistent.** SSO config, ALLOWED_ORIGINS, Keycloak redirect URIs, and browser address bar must all use the same format. (v6: SSO 400 error)
+
+## v6.2 Additions (2026-03-25 — Auth hardening session)
+
+16. **ContextForge rejects external IdP tokens by default.** Stock 1.0.0-RC-2 only verifies `iss: "mcpgateway"`. Applied community PR #3715 as a patch — adds JWKS verification for Keycloak tokens. Verified locally + Cloud Run. (v6.2: 401 on every MCP request through ContextForge)
+
+17. **Claude Code crashes on ContextForge tool responses.** Multi-line tool descriptions (1000+ chars with newlines) trigger Anthropic API error: `cache_control cannot be set for empty text blocks`. Not a ContextForge bug — tool responses are clean when tested via curl. Workaround: use Apollo directly instead of through ContextForge. (v6.2: session-killing crash)
+
+18. **Claude.ai OAuth is fundamentally broken for external IdPs.** Bug #82: ignores `authorization_endpoint` from metadata, hardcodes `/authorize` on MCP domain. Even with a reverse proxy routing OAuth paths to Keycloak, Claude.ai completes DCR but skips the authorize step entirely. No server-side fix possible. (v6.2: 4 proxy iterations before discovering the client bug)
+
+19. **Keycloak DCR has cascading policy rejections.** Each policy (Trusted Hosts, Allowed Client Scopes, etc.) rejects independently with different 403 messages. Check Keycloak logs, not proxy logs, for the specific rejection reason. Claude.ai requests `service_account` scope which must be explicitly allowed. (v6.2: 3 deploy iterations fixing one policy at a time)
+
+20. **Auth-proxy health must be independent of upstream.** Cloud Run multi-container startup probes run before all sidecars are ready. Proxying `/health` to an upstream that hasn't started = startup probe failure = deploy failure. Return 200 directly. (v6.2: 2 failed deploys)
+
+21. **Apollo config changed between v1.9.0 and v1.10.0.** `mutation_mode` is no longer a valid config key (not top-level, not under `introspection.execute`). Don't trust cached knowledge about config schemas — check the actual binary's error messages. (v6.2: 2 failed deploys with wrong config)
