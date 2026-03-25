@@ -20,7 +20,7 @@ spec:
               memory: 512Mi
               cpu: "1"
         - name: credential-proxy
-          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy:latest
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy@sha256:645256890d30831296bfba7f16d535f739d993177b0cefc9dad311951b7f14a9
           env:
             - name: FORWARDED_ALLOW_IPS
               value: "*"

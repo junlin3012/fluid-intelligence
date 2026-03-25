@@ -1,0 +1,9 @@
+# Apollo with auth-proxy config — port 8001, full features enabled
+# Layers on top of the existing Apollo image, just replaces config.yaml
+# No Rust rebuild needed.
+
+FROM asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/apollo:latest
+
+COPY config-authenticated.yaml /app/config.yaml
+
+EXPOSE 8001

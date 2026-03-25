@@ -82,9 +82,12 @@ services:
     restart: unless-stopped
 
   # ── 3. ContextForge ────────────────────────────────────────────────
-  # Stock image + env vars ONLY. SSO handles all auth — zero custom code.
+  # Patched image: stock + PR #3715 (OAuth JWKS verification for IdP tokens).
+  # Remove Dockerfile and revert to stock image when ContextForge >= 1.0.0-GA includes #3715.
   contextforge:
-    image: ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
+    build:
+      context: ./services/platform/contextforge
+      dockerfile: Dockerfile
     environment:
       HOST: "0.0.0.0"
       MCG_HOST: "0.0.0.0"
@@ -123,14 +126,14 @@ services:
       PLATFORM_ADMIN_EMAIL: "${PLATFORM_ADMIN_EMAIL:-admin@example.com}"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
     ports:
-      - "8080:8080"
+      - "8080:4444"
     depends_on:
       postgres:
         condition: service_healthy
       keycloak:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health > /dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:4444/health > /dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

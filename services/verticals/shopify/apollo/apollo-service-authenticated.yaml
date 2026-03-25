@@ -1,0 +1,86 @@
+# Apollo Cloud Run service with Keycloak auth
+#
+# 3 containers:
+#   auth-proxy (port 8000, ingress) → validates Keycloak JWT
+#   apollo (port 8001) → MCP server, executes Shopify GraphQL
+#   credential-proxy (port 8080) → injects Shopify access token
+#
+# Flow: Client → auth-proxy → Apollo → credential-proxy → Shopify API
+#
+# Deploy:
+#   gcloud run services replace apollo-service-authenticated.yaml --region=asia-southeast1
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: apollo
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/container-dependencies: '{"auth-proxy": ["apollo"], "apollo": ["credential-proxy"]}'
+    spec:
+      containers:
+        - name: auth-proxy
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/auth-proxy:v4
+          ports:
+            - containerPort: 8000
+          env:
+            - name: UPSTREAM_URL
+              value: "http://localhost:8001"
+            - name: KEYCLOAK_ISSUER
+              value: "https://keycloak-apanptkfaq-as.a.run.app/realms/fluid"
+            - name: PUBLIC_URL
+              value: "https://apollo-apanptkfaq-as.a.run.app"
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 2
+
+        - name: apollo
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/apollo-authenticated:v4
+          env:
+            - name: SHOPIFY_API_VERSION
+              value: "2026-01"
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: "1"
+          startupProbe:
+            tcpSocket:
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 3
+
+        - name: credential-proxy
+          image: asia-southeast1-docker.pkg.dev/junlinleather-mcp/junlin-mcp/credential-proxy@sha256:645256890d30831296bfba7f16d535f739d993177b0cefc9dad311951b7f14a9
+          env:
+            - name: FORWARDED_ALLOW_IPS
+              value: "*"
+            - name: TOKEN_SERVICE_URL
+              value: "https://token-service-apanptkfaq-as.a.run.app"
+            - name: SHOPIFY_HOST
+              value: "https://junlinleather-5148.myshopify.com"
+            - name: TOKEN_SERVICE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: token-service-api-key
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 2

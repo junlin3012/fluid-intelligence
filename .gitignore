@@ -32,3 +32,6 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# ContextForge patches (extracted from IBM image, contain test fixtures flagged as secrets)
+services/platform/contextforge/patches/*.py

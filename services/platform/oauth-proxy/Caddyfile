@@ -1,0 +1,59 @@
+# OAuth Proxy — Claude.ai bug #82 workaround
+#
+# Claude.ai hardcodes OAuth endpoints on the MCP server domain instead of
+# following RFC 9728 metadata to the external IdP (Keycloak).
+#
+# This proxy routes Keycloak paths to Keycloak, everything else to ContextForge.
+#
+# Remove when Anthropic fixes: https://github.com/anthropics/claude-ai-mcp/issues/82
+
+:{$PORT:8080}
+
+# Root-level OAuth shortcuts (Claude.ai hardcodes these)
+handle /authorize {
+	reverse_proxy {$KEYCLOAK_URL} {
+		rewrite /realms/{$KEYCLOAK_REALM:fluid}/protocol/openid-connect/auth
+		header_up Host {upstream_hostport}
+	}
+}
+
+handle /token {
+	reverse_proxy {$KEYCLOAK_URL} {
+		rewrite /realms/{$KEYCLOAK_REALM:fluid}/protocol/openid-connect/token
+		header_up Host {upstream_hostport}
+	}
+}
+
+handle /register {
+	reverse_proxy {$KEYCLOAK_URL} {
+		rewrite /realms/{$KEYCLOAK_REALM:fluid}/clients-registrations/openid-connect
+		header_up Host {upstream_hostport}
+	}
+}
+
+# All /realms/* paths → Keycloak (Claude.ai follows full paths from metadata)
+handle /realms/* {
+	reverse_proxy {$KEYCLOAK_URL} {
+		header_up Host {upstream_hostport}
+	}
+}
+
+# OAuth/OIDC discovery metadata → Keycloak
+handle /.well-known/oauth-authorization-server {
+	reverse_proxy {$KEYCLOAK_URL} {
+		rewrite /realms/{$KEYCLOAK_REALM:fluid}/.well-known/openid-configuration
+		header_up Host {upstream_hostport}
+	}
+}
+
+handle /.well-known/openid-configuration {
+	reverse_proxy {$KEYCLOAK_URL} {
+		rewrite /realms/{$KEYCLOAK_REALM:fluid}/.well-known/openid-configuration
+		header_up Host {upstream_hostport}
+	}
+}
+
+# Everything else → ContextForge
+handle {
+	reverse_proxy {$CONTEXTFORGE_URL}
+}

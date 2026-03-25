@@ -1,0 +1,23 @@
+# Apollo MCP Server config — with auth-proxy sidecar
+# Apollo listens on port 8001 (auth-proxy takes 8000 as ingress).
+# Auth-proxy validates Keycloak JWT → forwards to Apollo → credential-proxy → Shopify.
+endpoint: http://localhost:8080/admin/api/${env.SHOPIFY_API_VERSION:-2026-01}/graphql.json
+
+transport:
+  type: streamable_http
+  address: 0.0.0.0
+  port: 8001
+  host_validation:
+    enabled: false
+
+schema:
+  source: local
+  path: /app/shopify-schema.graphql
+
+introspection:
+  execute:
+    enabled: true
+  validate:
+    enabled: true
+
+headers: {}
